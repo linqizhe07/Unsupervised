@@ -47,6 +47,15 @@ def call_reward_func_dynamically(reward_func, env_state):
     return reward, reward_components
 
 
+def build_env_state_from_obs(obs: np.ndarray) -> dict:
+    """Build env_state dict from a raw observation vector.
+
+    This allows evaluating reward functions on stored observations
+    (e.g. from the replay buffer during U2O skill inference).
+    """
+    return {"observation": obs}
+
+
 DEFAULT_CAMERA_CONFIG = {
     "trackbodyid": 1,
     "distance": 4.0,

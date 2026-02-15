@@ -99,6 +99,24 @@ def generate_valid_reward(
 def main(cfg):
     env_name = cfg.environment.name
 
+    # U2O configuration
+    u2o_enabled = cfg.get("u2o", {}).get("enabled", False)
+    u2o_pretrained_dir = None
+    u2o_cfg = {}
+    if u2o_enabled:
+        u2o_pretrained_dir = cfg.u2o.pretrained_dir
+        u2o_cfg = {
+            "z_dim": cfg.u2o.get("z_dim", 50),
+            "hidden_dim": cfg.u2o.get("hidden_dim", 1024),
+            "phi_hidden_dim": cfg.u2o.get("phi_hidden_dim", 512),
+            "feature_dim": cfg.u2o.get("feature_dim", 512),
+            "feature_learner": cfg.u2o.get("feature_learner", "hilp"),
+            "lr": cfg.u2o.get("lr", 1e-4),
+            "batch_size": cfg.u2o.get("batch_size", 1024),
+            "finetune_steps": cfg.u2o.get("finetune_steps", 1000),
+        }
+        print(f"U2O mode enabled. Pretrained dir: {u2o_pretrained_dir}")
+
     system_prompt = prompts.types["system_prompt"]
     env_input_prompt = prompts.types["env_input_prompt"]
 
@@ -194,16 +212,20 @@ def main(cfg):
 
             try:
                 # initialize RL agent policy with the generated reward function
-                policies.append(
-                    TrainPolicy(
-                        reward_func_str,
-                        generation_id,
-                        counter_id,
-                        island_id,
-                        cfg.evolution.baseline,  # cfg.evolution.baseline
-                        cfg.database.rewards_dir,
-                    )
+                policy = TrainPolicy(
+                    reward_func_str,
+                    generation_id,
+                    counter_id,
+                    island_id,
+                    cfg.evolution.baseline,  # cfg.evolution.baseline
+                    cfg.database.rewards_dir,
                 )
+                if u2o_enabled:
+                    policy.enable_u2o(
+                        pretrained_dir=u2o_pretrained_dir,
+                        u2o_cfg=u2o_cfg,
+                    )
+                policies.append(policy)
                 rew_fn_strings.append(reward_func_str)
                 counter_ids.append(counter_id)
             except Exception as e:

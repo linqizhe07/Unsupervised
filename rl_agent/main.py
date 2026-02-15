@@ -191,3 +191,189 @@ def run_training(
     )
 
     # return velocity_filepath
+
+
+def run_training_u2o(
+    reward_func,
+    island_id,
+    generation_id,
+    counter,
+    reward_history_file,
+    model_checkpoint_file,
+    fitness_file,
+    velocity_file,
+    output_path,
+    log_dir,
+    pretrained_dir,
+    u2o_cfg,
+):
+    """
+    U2O version of run_training using SFAgent with successor features.
+
+    1. Load pretrained SFAgent and replay buffer
+    2. Create HumanoidEnv with LLM reward
+    3. Infer skill z* from task reward via least-squares on phi
+    4. Fine-tune with online data collection + offline data mixing
+    """
+    import json
+    from collections import OrderedDict
+    from u2o.agent import SFAgent, SFAgentConfig
+    from u2o.replay_buffer import ReplayBuffer
+    from u2o.wrappers import EpisodeMonitor
+    from utils import define_function_from_string
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(model_checkpoint_file, exist_ok=True)
+
+    # Load pretrained config
+    config_path = os.path.join(pretrained_dir, "pretrain_config.json")
+    with open(config_path, "r") as f:
+        pretrain_config = json.load(f)
+
+    # Recreate SFAgent with same architecture
+    cfg = SFAgentConfig(
+        obs_dim=pretrain_config["obs_dim"],
+        action_dim=pretrain_config["action_dim"],
+        device=str(device),
+        lr=u2o_cfg.get("lr", pretrain_config.get("lr", 1e-4)),
+        hidden_dim=pretrain_config["hidden_dim"],
+        phi_hidden_dim=pretrain_config["phi_hidden_dim"],
+        feature_dim=pretrain_config["feature_dim"],
+        z_dim=pretrain_config["z_dim"],
+        batch_size=u2o_cfg.get("batch_size", pretrain_config.get("batch_size", 1024)),
+        feature_learner=pretrain_config["feature_learner"],
+        hilp_discount=pretrain_config.get("hilp_discount", 0.98),
+        hilp_expectile=pretrain_config.get("hilp_expectile", 0.5),
+    )
+    agent = SFAgent(cfg)
+
+    # Load pretrained weights
+    agent_path = os.path.join(pretrained_dir, "agent_checkpoint.pt")
+    agent.load(agent_path)
+    agent.cfg.num_expl_steps = 0  # no random exploration during finetuning
+    print(f"[U2O] Loaded pretrained agent from {agent_path}")
+
+    # Load offline replay buffer
+    offline_buffer = ReplayBuffer(
+        max_episodes=pretrain_config.get("collection_episodes", 5000),
+        discount=pretrain_config.get("discount", 0.98),
+        future=pretrain_config.get("future", 0.99),
+        p_randomgoal=pretrain_config.get("p_randomgoal", 0.375),
+    )
+    buffer_path = os.path.join(pretrained_dir, "replay_buffer.npz")
+    offline_buffer.load(buffer_path)
+    print(f"[U2O] Loaded offline buffer ({len(offline_buffer)} episodes)")
+
+    # Infer z* from task reward using least-squares on phi
+    reward_func_obj, _ = define_function_from_string(reward_func)
+    sample_size = min(cfg.batch_size * 4, offline_buffer.num_transitions)
+    batch = offline_buffer.sample(sample_size)
+    batch = batch.to(str(device))
+
+    # Compute task rewards on buffer transitions
+    from rl_agent.HumanoidEnv import call_reward_func_dynamically, build_env_state_from_obs
+    task_rewards = []
+    obs_np = batch.obs.cpu().numpy()
+    for i in range(obs_np.shape[0]):
+        try:
+            env_state = build_env_state_from_obs(obs_np[i])
+            r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
+            task_rewards.append(float(r))
+        except Exception:
+            task_rewards.append(0.0)
+    task_reward_tensor = torch.tensor(
+        task_rewards, device=device, dtype=torch.float32
+    ).unsqueeze(-1)
+
+    meta = agent.infer_meta_from_obs_and_rewards(
+        batch.obs, task_reward_tensor, batch.next_obs
+    )
+    z_star = meta["z"]
+    print(f"[U2O] Inferred z* (norm={np.linalg.norm(z_star):.4f})")
+
+    # Set solved meta for agent
+    agent.solved_meta = meta
+
+    # Create environment for online fine-tuning
+    gymenv = HumanoidEnv(
+        reward_func_str=reward_func,
+        counter=counter,
+        generation_id=generation_id,
+        island_id=island_id,
+        reward_history_file=reward_history_file,
+        model_checkpoint_file=model_checkpoint_file,
+        velocity_file=velocity_file,
+    )
+    env = EpisodeMonitor(gymenv)
+
+    # Online replay buffer for fine-tuning
+    finetune_steps = u2o_cfg.get("finetune_steps", 1000)
+    online_buffer = ReplayBuffer(
+        max_episodes=1000,
+        discount=pretrain_config.get("discount", 0.98),
+        future=1.0,
+    )
+
+    # Fine-tuning loop
+    obs, info = env.reset()
+    episode_reward = 0.0
+    episode_count = 0
+    velocity_log = []
+
+    os.makedirs(os.path.dirname(velocity_file), exist_ok=True)
+
+    for step in range(1, finetune_steps + 1):
+        action = agent.act(obs, meta, step, eval_mode=False)
+        next_obs, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+
+        online_buffer.add_transition(
+            obs=obs, action=action, reward=reward,
+            next_obs=next_obs, done=done,
+            discount=0.0 if terminated else 1.0,
+        )
+
+        episode_reward += reward
+        if "x_velocity" in info:
+            velocity_log.append(info["x_velocity"])
+
+        if done:
+            episode_count += 1
+            obs, info = env.reset()
+            episode_reward = 0.0
+        else:
+            obs = next_obs
+
+        # Update agent with mixed online + offline data
+        if len(online_buffer) >= 2 and step % cfg.update_every_steps == 0:
+            agent.update_with_offline_data(
+                replay_loader=online_buffer,
+                step=step,
+                with_reward=True,
+                meta=meta,
+                replay_loader_offline=offline_buffer,
+            )
+
+        # Periodic checkpoint
+        if step % 500 == 0:
+            ckpt_path = os.path.join(
+                model_checkpoint_file,
+                f"u2o_{generation_id}_{counter}_{step}.pt",
+            )
+            agent.save(ckpt_path)
+
+    # Save velocity log
+    with open(velocity_file, "w") as f:
+        for v in velocity_log:
+            f.write(f"{v}\n")
+
+    # Save final checkpoint
+    final_path = os.path.join(
+        model_checkpoint_file,
+        f"u2o_final_{generation_id}_{counter}.pt",
+    )
+    agent.save(final_path)
+    print(
+        f"[U2O] Fine-tuning complete: {episode_count} episodes, {finetune_steps} steps"
+    )

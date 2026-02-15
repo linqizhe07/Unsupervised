@@ -37,3 +37,24 @@ data_paths:
 environment:
   name: "HumanoidEnv"  # Choose between "HumanoidEnv" or "AdroitHandDoorEnv"
 
+u2o:
+  enabled: false  # set to true to use U2O pretraining
+  pretrained_dir: ${root_dir}/u2o_pretrained
+  # SFAgent config (scaled for Humanoid 376-dim obs)
+  z_dim: 100             # skill vector dimension
+  hidden_dim: 2048       # network hidden size
+  phi_hidden_dim: 1024   # feature network hidden size
+  feature_dim: 1024      # feature output dimension
+  feature_learner: hilp  # feature learning method (hilp, lap, contrastive, icm, etc.)
+  hilp_discount: 0.98    # HILP temporal discount
+  hilp_expectile: 0.5    # expectile for value learning
+  # Training
+  lr: 1e-4               # learning rate
+  batch_size: 2048       # batch size
+  finetune_steps: 50000  # fine-tuning steps per reward function
+  discount: 0.98         # MDP discount
+  sf_target_tau: 0.01    # soft update rate for target networks
+  # Replay buffer
+  future: 0.99           # future sampling discount
+  p_randomgoal: 0.375    # random goal sampling probability
+

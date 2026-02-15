@@ -143,9 +143,19 @@ class TrainPolicy:
         self.counter_id = counter_id
         self.baseline = baseline  # ['revolve', 'revolve_auto', 'eureka', 'eureka_auto']
         self.output_log = output_log
+        # U2O parameters (optional, set via enable_u2o())
+        self.u2o_enabled = False
+        self.pretrained_dir = None
+        self.u2o_cfg = {}
         logging.info(
             f"Initializing TrainPolicy: generation_id={generation_id}, island_id={island_id}, type(island_id)={type(island_id)}"
         )
+
+    def enable_u2o(self, pretrained_dir: str, u2o_cfg: dict = None):
+        """Enable U2O mode: SFAgent skill inference + fine-tune."""
+        self.u2o_enabled = True
+        self.pretrained_dir = pretrained_dir
+        self.u2o_cfg = u2o_cfg or {}
 
     def _load_train_cfg(self):
         logging.info("Loading train cfg")
@@ -201,18 +211,38 @@ class TrainPolicy:
             f"island_{self.island_id}/log_dir/{self.generation_id}_{self.counter_id}",
         )
 
-        run_training(
-            self.reward_func_str,
-            self.island_id,
-            self.generation_id,
-            self.counter_id,
-            reward_history_file,
-            model_checkpoint_path,
-            fitness_file,
-            velocity_file_path,
-            self.output_log,
-            log_dir,
-        )
+        if self.u2o_enabled:
+            # U2O path: SFAgent skill inference + fine-tune
+            from rl_agent.main import run_training_u2o
+
+            run_training_u2o(
+                self.reward_func_str,
+                self.island_id,
+                self.generation_id,
+                self.counter_id,
+                reward_history_file,
+                model_checkpoint_path,
+                fitness_file,
+                velocity_file_path,
+                self.output_log,
+                log_dir,
+                pretrained_dir=self.pretrained_dir,
+                u2o_cfg=self.u2o_cfg,
+            )
+        else:
+            # Original path: from-scratch training
+            run_training(
+                self.reward_func_str,
+                self.island_id,
+                self.generation_id,
+                self.counter_id,
+                reward_history_file,
+                model_checkpoint_path,
+                fitness_file,
+                velocity_file_path,
+                self.output_log,
+                log_dir,
+            )
         return checkpoint_file, velocity_file_path
 
 
