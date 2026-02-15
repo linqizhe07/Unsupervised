@@ -61,6 +61,40 @@ class SFAgentConfig:
     num_expl_steps: int = 2000
 
 
+class RunningMeanStd:
+    """Tracks running mean/std for observation normalization."""
+
+    def __init__(self, shape: int, device: str = "cpu"):
+        self.mean = torch.zeros(shape, device=device)
+        self.var = torch.ones(shape, device=device)
+        self.count = 1e-4  # avoid division by zero
+
+    def update(self, x: torch.Tensor) -> None:
+        batch_mean = x.mean(dim=0)
+        batch_var = x.var(dim=0, unbiased=False)
+        batch_count = x.shape[0]
+
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+        self.mean = self.mean + delta * batch_count / total_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / total_count
+        self.var = m2 / total_count
+        self.count = total_count
+
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean) / (torch.sqrt(self.var) + 1e-8)
+
+    def state_dict(self) -> dict:
+        return {"mean": self.mean, "var": self.var, "count": self.count}
+
+    def load_state_dict(self, state: dict) -> None:
+        self.mean = state["mean"]
+        self.var = state["var"]
+        self.count = state["count"]
+
+
 class SFAgent:
     """Successor Feature agent with HILP feature learning."""
 
@@ -73,6 +107,9 @@ class SFAgent:
         self.obs_dim = cfg.obs_dim
         if cfg.feature_learner == "identity":
             cfg.z_dim = self.obs_dim
+
+        # Observation normalization for high-dim Humanoid
+        self.obs_rms = RunningMeanStd(cfg.obs_dim, device=cfg.device)
 
         # Create actor
         if cfg.boltzmann:
@@ -142,6 +179,12 @@ class SFAgent:
         self.rew_running_std = torch.ones(1).to(cfg.device)
         self.init_rew_running_mean = True
 
+    def _normalize_obs(self, obs: torch.Tensor, update_stats: bool = False) -> torch.Tensor:
+        """Normalize observations using running mean/std."""
+        if update_stats and self.training:
+            self.obs_rms.update(obs)
+        return self.obs_rms.normalize(obs)
+
     def train(self, training: bool = True) -> None:
         self.training = training
         for net in [self.actor, self.successor_net]:
@@ -180,6 +223,8 @@ class SFAgent:
         assert self.cfg.feature_learner == "hilp"
         obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.cfg.device)
         goal_t = torch.tensor(goal_obs, dtype=torch.float32).unsqueeze(0).to(self.cfg.device)
+        obs_t = self._normalize_obs(obs_t)
+        goal_t = self._normalize_obs(goal_t)
 
         with torch.no_grad():
             z_g = self.feature_learner.feature_net(goal_t)
@@ -196,6 +241,8 @@ class SFAgent:
         self, obs: torch.Tensor, reward: torch.Tensor, next_obs: torch.Tensor
     ) -> MetaDict:
         """Infer optimal skill z* from observations and task rewards via least-squares."""
+        obs = self._normalize_obs(obs)
+        next_obs = self._normalize_obs(next_obs)
         with torch.no_grad():
             if self.cfg.feature_type == "state":
                 phi = self.feature_learner.feature_net(obs)
@@ -214,6 +261,7 @@ class SFAgent:
 
     def act(self, obs: np.ndarray, meta: MetaDict, step: int, eval_mode: bool = False) -> np.ndarray:
         obs = torch.as_tensor(obs, device=self.cfg.device, dtype=torch.float32).unsqueeze(0)
+        obs = self._normalize_obs(obs)
         z = torch.as_tensor(meta["z"], device=self.cfg.device, dtype=torch.float32).unsqueeze(0)
 
         if self.cfg.boltzmann:
@@ -325,6 +373,9 @@ class SFAgent:
             self.phi_opt.zero_grad(set_to_none=True)
             phi_loss.backward(retain_graph=True)
         sf_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.successor_net.parameters(), max_norm=1.0)
+        if self.phi_opt is not None:
+            torch.nn.utils.clip_grad_norm_(self.feature_learner.parameters(), max_norm=1.0)
         self.sf_opt.step()
         if self.phi_opt is not None:
             self.phi_opt.step()
@@ -374,6 +425,7 @@ class SFAgent:
 
         self.sf_opt.zero_grad(set_to_none=True)
         sf_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.successor_net.parameters(), max_norm=1.0)
         self.sf_opt.step()
 
         return metrics
@@ -400,6 +452,7 @@ class SFAgent:
 
         self.actor_opt.zero_grad(set_to_none=True)
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_opt.step()
 
         metrics["actor_loss"] = actor_loss.item()
@@ -427,6 +480,12 @@ class SFAgent:
             next_obs = batch.next_obs
             future_obs = batch.future_obs
 
+            # Normalize observations (update running stats with raw obs)
+            obs = self._normalize_obs(obs, update_stats=True)
+            next_obs = self._normalize_obs(next_obs)
+            if future_obs is not None:
+                future_obs = self._normalize_obs(future_obs)
+
             if meta is None:
                 z = self.sample_z(self.cfg.batch_size).to(self.cfg.device)
             else:
@@ -439,6 +498,7 @@ class SFAgent:
                 with torch.no_grad():
                     phi = self._get_phi(next_obs[perm], obs[perm])
                 cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                cov = cov + 1e-4 * torch.eye(cov.shape[0], device=cov.device)
                 inv_cov = torch.linalg.pinv(cov)
 
                 mix_idxs: tp.Any = np.where(
@@ -507,6 +567,12 @@ class SFAgent:
             else:
                 future_obs = None
 
+            # Normalize observations
+            obs = self._normalize_obs(obs, update_stats=True)
+            next_obs = self._normalize_obs(next_obs)
+            if future_obs is not None:
+                future_obs = self._normalize_obs(future_obs)
+
             if meta is None:
                 z = self.sample_z(self.cfg.batch_size).to(self.cfg.device)
             else:
@@ -518,6 +584,7 @@ class SFAgent:
                 with torch.no_grad():
                     phi = self._get_phi(next_obs[perm], obs[perm])
                 cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                cov = cov + 1e-4 * torch.eye(cov.shape[0], device=cov.device)
                 inv_cov = torch.linalg.pinv(cov)
                 mix_idxs = np.where(
                     np.random.uniform(size=self.cfg.batch_size) < self.cfg.mix_ratio
@@ -561,6 +628,7 @@ class SFAgent:
             "rew_running_mean": self.rew_running_mean,
             "rew_running_std": self.rew_running_std,
             "init_rew_running_mean": self.init_rew_running_mean,
+            "obs_rms": self.obs_rms.state_dict(),
             "cfg": dataclasses.asdict(self.cfg),
         }
         if self.phi_opt is not None:
@@ -582,4 +650,6 @@ class SFAgent:
         self.rew_running_mean = state.get("rew_running_mean", self.rew_running_mean)
         self.rew_running_std = state.get("rew_running_std", self.rew_running_std)
         self.init_rew_running_mean = state.get("init_rew_running_mean", True)
+        if "obs_rms" in state:
+            self.obs_rms.load_state_dict(state["obs_rms"])
         logger.info(f"Loaded agent from {path}")
