@@ -156,8 +156,8 @@ class ReplayBuffer:
         eps_lengths = self._episodes_length[ep_idx]
         random_eps_lengths = self._episodes_length[random_ep_idx]
 
-        step_idx = np.array([np.random.randint(0, l) for l in eps_lengths])
-        random_step_idx = np.array([np.random.randint(0, l) for l in random_eps_lengths])
+        step_idx = (np.random.rand(batch_size) * eps_lengths).astype(np.int32)
+        random_step_idx = (np.random.rand(batch_size) * random_eps_lengths).astype(np.int32)
 
         obs = self._storage["observation"][ep_idx, step_idx]
         action = self._storage["action"][ep_idx, step_idx]

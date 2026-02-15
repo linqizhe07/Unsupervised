@@ -3,7 +3,6 @@
 **Based on the official ICLR 2025 REvolve paper, extended with U2O (Unsupervised-to-Online RL) pretraining.**
 
 
-
 ## Overview
 
 REvolve uses LLM-guided evolutionary algorithms to automatically design reward functions for RL. This fork integrates **U2O (Unsupervised-to-Online RL)** based on the [u2o_zsrl](https://arxiv.org/abs/2408.14785) framework to address the "blind search" problem: instead of training each candidate reward function from scratch, we pretrain a skill-conditioned policy using **Successor Features (SF)** with **HILP** feature learning, then fine-tune it per candidate reward via skill inference, yielding faster evaluation and more stable fitness signals.
@@ -24,8 +23,8 @@ agent_checkpoint.pt + replay_buffer.npz
 
 ## Setup
 ```shell
-git clone https://github.com/RishiHazra/Revolve.git
-cd Revolve
+git clone https://github.com/Linqizhe07/Unsupervised.git
+cd Unsupervised
 conda create -n "revolve" python=3.10
 conda activate revolve
 pip install -e .
@@ -61,7 +60,7 @@ python -m u2o.pretrain \
         --feature_dim 1024 \
         --feature_learner hilp \
         --collection_episodes 10000 \
-        --pretrain_steps 5000000 \
+        --pretrain_steps 3000000 \
         --batch_size 2048 \
         --wandb_project revolve-u2o
 ```
