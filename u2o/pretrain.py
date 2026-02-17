@@ -148,12 +148,11 @@ def collect_rnd_data(
                 action = env.action_space.sample()
                 log_prob = None
             else:
-                with torch.no_grad():
-                    dist = actor(norm_obs)
-                    action_t = dist.sample()
-                    log_prob = dist.log_prob(action_t).sum(-1)
-                    action = action_t.squeeze(0).cpu().numpy()
-                    action = np.clip(action, -1.0, 1.0)
+                dist = actor(norm_obs)
+                action_t = dist.sample()
+                log_prob = dist.log_prob(action_t).sum(-1)
+                action = action_t.squeeze(0).detach().cpu().numpy()
+                action = np.clip(action, -1.0, 1.0)
 
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
