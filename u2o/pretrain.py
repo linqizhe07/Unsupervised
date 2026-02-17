@@ -31,6 +31,7 @@ if root_path not in sys.path:
 
 from rl_agent.HumanoidEnv import HumanoidEnv
 from u2o.agent import SFAgent, SFAgentConfig, RunningMeanStd
+from u2o.networks import FEATURE_LEARNERS
 from u2o.replay_buffer import ReplayBuffer
 from u2o import utils
 
@@ -131,47 +132,67 @@ def collect_rnd_data(
     total_steps = 0
     recent_intrinsic = []
 
+    def safe_normalize(obs_t: torch.Tensor) -> torch.Tensor:
+        """Normalize obs with var clamped to prevent explosion on near-constant dims."""
+        safe_std = torch.sqrt(torch.clamp(obs_rms.var, min=1e-2)) + 1e-8
+        return (obs_t - obs_rms.mean) / safe_std
+
     for ep in range(num_episodes):
         obs, info = env.reset()
         done = False
         step = 0
-        ep_obs_list = []
-        ep_logprobs = []
+        ep_raw_obs = []        # raw obs tensors for batch obs_rms update
+        ep_obs_list = []       # detached normalized obs for RND update
+        ep_transitions = []    # (norm_obs, action_pre_clip) for REINFORCE
         ep_intrinsic = []
 
         while not done and step < max_episode_steps:
             obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-            obs_rms.update(obs_t)
-            norm_obs = obs_rms.normalize(obs_t)
+            ep_raw_obs.append(obs_t.squeeze(0))
+            norm_obs = safe_normalize(obs_t)
 
             if ep < random_warmup_episodes:
                 action = env.action_space.sample()
-                log_prob = None
+                is_actor = False
             else:
-                dist = actor(norm_obs)
-                action_t = dist.sample()
-                log_prob = dist.log_prob(action_t).sum(-1)
-                action = action_t.squeeze(0).detach().cpu().numpy()
-                action = np.clip(action, -1.0, 1.0)
+                with torch.no_grad():
+                    dist = actor(norm_obs)
+                    action_t = dist.sample()
+                    action_pre_clip = action_t.squeeze(0).cpu().numpy()
+                    action = np.clip(action_pre_clip, -1.0, 1.0)
+                is_actor = True
+
+            # NaN safety: fall back to random action
+            if np.any(np.isnan(action)):
+                action = env.action_space.sample()
+                is_actor = False
 
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
             with torch.no_grad():
                 intrinsic_r = rnd.intrinsic_reward(norm_obs).item()
+                if np.isnan(intrinsic_r):
+                    intrinsic_r = 0.0
 
+            # Store env reward (0.0) in buffer, not intrinsic reward
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
-                reward=intrinsic_r,
+                reward=0.0,
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
             )
 
-            ep_obs_list.append(norm_obs.squeeze(0))
-            if log_prob is not None:
-                ep_logprobs.append(log_prob)
+            norm_obs_detached = norm_obs.squeeze(0).detach()
+            ep_obs_list.append(norm_obs_detached)
+            if is_actor:
+                # Store pre-clip action for correct log_prob recompute
+                ep_transitions.append((
+                    norm_obs_detached,
+                    torch.tensor(action_pre_clip, dtype=torch.float32, device=device),
+                ))
             ep_intrinsic.append(intrinsic_r)
 
             obs = next_obs
@@ -180,6 +201,10 @@ def collect_rnd_data(
 
         if not done:
             replay_buffer._store_episode()
+
+        # Batch update obs_rms once per episode (stable normalization)
+        if ep_raw_obs:
+            obs_rms.update(torch.stack(ep_raw_obs))
 
         # Update RND predictor on episode observations
         if ep_obs_list:
@@ -190,26 +215,38 @@ def collect_rnd_data(
             rnd_opt.step()
 
         # REINFORCE update on actor (after warmup, every K episodes)
+        # Recompute log_probs with fresh graph instead of storing stale ones
         if (
             ep >= random_warmup_episodes
             and (ep - random_warmup_episodes) % actor_update_every == 0
-            and ep_logprobs
+            and len(ep_transitions) >= 2
         ):
-            rewards_t = torch.tensor(ep_intrinsic[-len(ep_logprobs):], device=device)
+            n = len(ep_transitions)
+            rewards_t = torch.tensor(ep_intrinsic[-n:], device=device)
             rew_rms.update(rewards_t.unsqueeze(-1))
             rewards_t = (rewards_t - rew_rms.mean.squeeze()) / (
-                torch.sqrt(rew_rms.var.squeeze()) + 1e-8
+                torch.sqrt(torch.clamp(rew_rms.var.squeeze(), min=1e-6)) + 1e-8
             )
             # Discounted returns
             returns = torch.zeros_like(rewards_t)
             G = 0.0
-            for i in range(len(rewards_t) - 1, -1, -1):
+            for i in range(n - 1, -1, -1):
                 G = rewards_t[i].item() + 0.99 * G
                 returns[i] = G
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+            ret_std = returns.std()
+            if ret_std > 1e-8:
+                returns = (returns - returns.mean()) / ret_std
+            else:
+                returns = returns - returns.mean()
 
-            log_probs = torch.stack(ep_logprobs).squeeze()
-            policy_loss = -(log_probs * returns).mean()
+            # Recompute log_probs with current actor (fresh computation graph)
+            # Use pre-clip actions so log_prob matches the actual sampled values
+            obs_batch = torch.stack([t[0] for t in ep_transitions])
+            act_batch = torch.stack([t[1] for t in ep_transitions])
+            dist = actor(obs_batch)
+            log_probs = dist.log_prob(act_batch).sum(-1)
+
+            policy_loss = -(log_probs * returns.detach()).mean()
             actor_opt.zero_grad()
             policy_loss.backward()
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_norm=1.0)
@@ -225,6 +262,72 @@ def collect_rnd_data(
             )
 
     return total_steps
+
+
+def resolve_device(device: str = None) -> str:
+    """Resolve requested device to an available torch device string."""
+    mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+    if device is None or device == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if mps_available:
+            return "mps"
+        return "cpu"
+
+    try:
+        parsed = torch.device(device)
+    except Exception as exc:
+        raise ValueError(f"Invalid device string: {device}") from exc
+
+    if parsed.type == "cuda" and not torch.cuda.is_available():
+        logger.warning("CUDA requested but not available. Falling back to CPU.")
+        return "cpu"
+    if parsed.type == "mps" and not mps_available:
+        logger.warning("MPS requested but not available. Falling back to CPU.")
+        return "cpu"
+
+    return str(parsed)
+
+
+def validate_pretrain_args(
+    feature_learner: str,
+    collection_episodes: int,
+    pretrain_steps: int,
+    max_episode_steps: int,
+    max_buffer_episodes: int,
+    batch_size: int,
+    eval_every: int,
+    log_every: int,
+    future: float,
+    p_randomgoal: float,
+) -> None:
+    """Validate pretraining arguments with actionable error messages."""
+    if feature_learner not in FEATURE_LEARNERS:
+        choices = ", ".join(sorted(FEATURE_LEARNERS.keys()))
+        raise ValueError(
+            f"Unsupported feature_learner='{feature_learner}'. Supported: {choices}"
+        )
+    if collection_episodes <= 0:
+        raise ValueError("collection_episodes must be > 0.")
+    if pretrain_steps < 0:
+        raise ValueError("pretrain_steps must be >= 0.")
+    if max_episode_steps <= 0:
+        raise ValueError("max_episode_steps must be > 0.")
+    if max_buffer_episodes <= 0:
+        raise ValueError("max_buffer_episodes must be > 0.")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0.")
+    if eval_every <= 0:
+        raise ValueError("eval_every must be > 0.")
+    if log_every <= 0:
+        raise ValueError("log_every must be > 0.")
+    if not (0.0 <= future <= 1.0):
+        raise ValueError("future must be within [0.0, 1.0].")
+    if feature_learner == "hilp" and future >= 1.0:
+        raise ValueError("HILP requires future < 1.0 so future goals can be sampled.")
+    if not (0.0 <= p_randomgoal <= 1.0):
+        raise ValueError("p_randomgoal must be within [0.0, 1.0].")
 
 
 def pretrain(
@@ -260,8 +363,19 @@ def pretrain(
     Phase 1: Data collection (random or RND-guided)
     Phase 2: Offline pretraining (train SFAgent on collected data)
     """
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    validate_pretrain_args(
+        feature_learner=feature_learner,
+        collection_episodes=collection_episodes,
+        pretrain_steps=pretrain_steps,
+        max_episode_steps=max_episode_steps,
+        max_buffer_episodes=max_buffer_episodes,
+        batch_size=batch_size,
+        eval_every=eval_every,
+        log_every=log_every,
+        future=future,
+        p_randomgoal=p_randomgoal,
+    )
+    device = resolve_device(device)
 
     os.makedirs(output_dir, exist_ok=True)
     utils.set_seed_everywhere(seed)
@@ -287,14 +401,26 @@ def pretrain(
         "p_randomgoal": p_randomgoal,
         "collection_episodes": collection_episodes,
         "pretrain_steps": pretrain_steps,
+        "max_episode_steps": max_episode_steps,
+        "max_buffer_episodes": max_buffer_episodes,
+        "eval_every": eval_every,
+        "log_every": log_every,
         "exploration": exploration,
+        "device": device,
         "seed": seed,
     }
 
     # Initialize wandb
+    wandb = None
     use_wandb = wandb_project is not None
     if use_wandb:
-        import wandb
+        try:
+            import wandb  # type: ignore
+        except ImportError as exc:
+            raise ImportError(
+                "wandb_project was provided, but wandb is not installed. "
+                "Install wandb or omit --wandb_project."
+            ) from exc
         wandb.init(
             project=wandb_project,
             entity=wandb_entity,
@@ -323,17 +449,28 @@ def pretrain(
     # Phase 1: Data Collection
     # ============================================================
     env = create_dummy_humanoid_env()
-    if exploration == "rnd":
-        print(f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---")
-        total_collected = collect_rnd_data(
-            env, replay_buffer, collection_episodes, max_episode_steps, device=device
-        )
-    else:
-        print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
-        total_collected = collect_random_data(
-            env, replay_buffer, collection_episodes, max_episode_steps
-        )
+    try:
+        if exploration == "rnd":
+            print(
+                f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---"
+            )
+            total_collected = collect_rnd_data(
+                env, replay_buffer, collection_episodes, max_episode_steps, device=device
+            )
+        else:
+            print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
+            total_collected = collect_random_data(
+                env, replay_buffer, collection_episodes, max_episode_steps
+            )
+    finally:
+        env.close()
+
     print(f"Collected {total_collected} transitions in {len(replay_buffer)} episodes")
+    if len(replay_buffer) == 0:
+        raise RuntimeError(
+            "Replay buffer is empty after data collection. "
+            "Increase collection_episodes or check environment rollout."
+        )
 
     # ============================================================
     # Phase 2: Offline Pretraining
@@ -359,9 +496,13 @@ def pretrain(
 
     timer = utils.Timer()
 
-    import psutil
-    import gc
-    process = psutil.Process()
+    process = None
+    try:
+        import psutil
+
+        process = psutil.Process()
+    except ImportError:
+        logger.warning("psutil not installed; memory usage logging will be skipped.")
 
     for step in range(1, pretrain_steps + 1):
         # Update agent (unsupervised, no task reward)
@@ -376,9 +517,12 @@ def pretrain(
                 if key in metrics:
                     log_str += f" | {key}: {metrics[key]:.4f}"
             # Memory monitoring
-            rss_mb = process.memory_info().rss / 1024 / 1024
-            gpu_mb = torch.cuda.memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0
-            log_str += f" | RAM: {rss_mb:.0f}MB | GPU: {gpu_mb:.0f}MB"
+            if process is not None:
+                rss_mb = process.memory_info().rss / 1024 / 1024
+                log_str += f" | RAM: {rss_mb:.0f}MB"
+            if torch.cuda.is_available():
+                gpu_mb = torch.cuda.memory_allocated() / 1024 / 1024
+                log_str += f" | GPU: {gpu_mb:.0f}MB"
             print(log_str)
 
             if use_wandb:
@@ -432,13 +576,16 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--discount", type=float, default=0.98)
     parser.add_argument("--future", type=float, default=0.99)
+    parser.add_argument("--p_randomgoal", type=float, default=0.375)
     parser.add_argument("--collection_episodes", type=int, default=5000)
+    parser.add_argument("--max_buffer_episodes", type=int, default=5000)
     parser.add_argument("--pretrain_steps", type=int, default=500000)
     parser.add_argument("--max_episode_steps", type=int, default=500)
     parser.add_argument("--eval_every", type=int, default=500000)
+    parser.add_argument("--log_every", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--exploration", type=str, default="random", choices=["random", "rnd"])
-    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--wandb_project", type=str, default=None)
     parser.add_argument("--wandb_entity", type=str, default=None)
     parser.add_argument("--wandb_run_name", type=str, default=None)
@@ -457,10 +604,13 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         discount=args.discount,
         future=args.future,
+        p_randomgoal=args.p_randomgoal,
         collection_episodes=args.collection_episodes,
+        max_buffer_episodes=args.max_buffer_episodes,
         pretrain_steps=args.pretrain_steps,
         max_episode_steps=args.max_episode_steps,
         eval_every=args.eval_every,
+        log_every=args.log_every,
         exploration=args.exploration,
         seed=args.seed,
         device=args.device,

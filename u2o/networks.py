@@ -125,7 +125,10 @@ class HILP(FeatureLearner):
         with torch.no_grad():
             phi1 = self.phi1(obs)
             self.running_mean = 0.995 * self.running_mean + 0.005 * phi1.mean(dim=0)
-            self.running_std = 0.995 * self.running_std + 0.005 * phi1.std(dim=0)
+            self.running_std = (
+                0.995 * self.running_std
+                + 0.005 * phi1.std(dim=0, unbiased=False)
+            ).clamp_min(1e-6)
 
         return value_loss, {
             "hilp/value_loss": value_loss,

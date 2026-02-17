@@ -283,16 +283,21 @@ class SFAgent:
         return action.detach().cpu().numpy()[0]
 
     def rew_norm(self, reward: torch.Tensor) -> torch.Tensor:
+        batch_mean = reward.mean(dim=0)
+        batch_std = reward.std(dim=0, unbiased=False).clamp_min(1e-6)
+
         if self.init_rew_running_mean:
-            self.rew_running_mean = reward.mean(dim=0)
-            self.rew_running_std = reward.std(dim=0)
+            self.rew_running_mean = batch_mean
+            self.rew_running_std = batch_std
             self.init_rew_running_mean = False
 
         eps = 1e-6
         norm_reward = (reward - self.rew_running_mean) / (self.rew_running_std + eps)
 
-        self.rew_running_mean = 0.995 * self.rew_running_mean + 0.005 * reward.mean(dim=0)
-        self.rew_running_std = 0.995 * self.rew_running_std + 0.005 * reward.std(dim=0)
+        self.rew_running_mean = 0.995 * self.rew_running_mean + 0.005 * batch_mean
+        self.rew_running_std = (
+            0.995 * self.rew_running_std + 0.005 * batch_std
+        ).clamp_min(1e-6)
         return norm_reward
 
     def _get_phi(self, obs: torch.Tensor, next_obs: tp.Optional[torch.Tensor] = None) -> torch.Tensor:
