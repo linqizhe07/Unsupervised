@@ -62,6 +62,7 @@ python -m u2o.pretrain \
         --collection_episodes 2000 \
         --pretrain_steps 500000 \
         --batch_size 2048 \
+        --exploration rnd \
         --wandb_project revolve-u2o-2
 ```
 
