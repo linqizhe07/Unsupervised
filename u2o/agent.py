@@ -345,6 +345,9 @@ class SFAgent:
                 if self.cfg.use_rew_norm:
                     reward = self.rew_norm(reward)
             target_Q = reward + torch.einsum("sd, sd -> s", next_F_disc, z)
+            # Clamp Q targets to prevent divergence in offline training
+            q_clamp = 200.0 * math.sqrt(self.cfg.z_dim)
+            target_Q = target_Q.clamp(-q_clamp, q_clamp)
             sf_loss = F.mse_loss(Q1, target_Q) + F.mse_loss(Q2, target_Q)
         else:
             sf_loss = F.mse_loss(F1, target_F) + F.mse_loss(F2, target_F)
@@ -420,6 +423,9 @@ class SFAgent:
             if self.cfg.use_rew_norm:
                 reward = self.rew_norm(reward)
             target_Q = reward.squeeze() + torch.einsum("sd, sd -> s", target_F, z)
+            # Clamp Q targets to prevent divergence in offline training
+            q_clamp = 200.0 * math.sqrt(self.cfg.z_dim)
+            target_Q = target_Q.clamp(-q_clamp, q_clamp)
         sf_loss = F.mse_loss(Q1, target_Q) + F.mse_loss(Q2, target_Q)
 
         metrics["sf_loss"] = sf_loss.item()
