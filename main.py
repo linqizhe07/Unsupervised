@@ -1,5 +1,7 @@
 import os
 import sys
+import traceback
+from typing import Optional, Tuple, List, Callable
 
 sys.path.append(os.environ["ROOT_PATH"])
 from rewards_database import RevolveDatabase, EurekaDatabase
@@ -58,7 +60,7 @@ def generate_valid_reward(
         reward_generation: RewardFunctionGeneration,
         in_context_prompt: str,
         max_trials: int = 10,
-) -> [str, List[str]]:
+) -> Tuple[Optional[str], Optional[List[str]]]:
     """
     single function generation until valid
     :param reward_generation: initialized class of RewardFunctionGeneration
@@ -68,7 +70,6 @@ def generate_valid_reward(
     """
     # used in case we want to provide python error feedbacks to the LLM
     error_feedback = ""
-    error_flag = False
     trials = 0
     while True:
         try:
@@ -78,7 +79,6 @@ def generate_valid_reward(
             rew_func, args = utils.define_function_from_string(rew_func_str)
             is_valid_reward_fn(rew_func, rew_func_str, args)
             logging.info("Valid reward function generated.")
-            error_flag = False
             error_feedback = ""
             break  # Exit the loop if successful
         except Exception as e:
@@ -87,7 +87,7 @@ def generate_valid_reward(
         trials += 1
         if trials >= max_trials:
             logging.info("Exceeded max trials.")
-            return None, None, None
+            return None, None
     return rew_func_str, args
 
 
@@ -198,7 +198,6 @@ def main(cfg):
                 )
                 operator_prompt = prompts.types[operator]
 
-            island_ids.append(island_id)
             # each sample in 'in_context_samples' is a tuple of (fn_path: str, fitness_score: float)
             in_context_prompt = RewardFunctionGeneration.prepare_in_context_prompt(
                 in_context_samples,
@@ -211,6 +210,11 @@ def main(cfg):
             reward_func_str, _ = generate_valid_reward(
                 reward_generation, in_context_prompt
             )
+            if reward_func_str is None:
+                logging.info(
+                    f"Skipping counter {counter_id}: failed to generate a valid reward function."
+                )
+                continue
 
             try:
                 # initialize RL agent policy with the generated reward function
@@ -229,6 +233,7 @@ def main(cfg):
                         parent_checkpoint_path=parent_checkpoint_path,
                     )
                 policies.append(policy)
+                island_ids.append(island_id)
                 rew_fn_strings.append(reward_func_str)
                 counter_ids.append(counter_id)
             except Exception as e:

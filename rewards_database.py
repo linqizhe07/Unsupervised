@@ -10,8 +10,18 @@ from evolutionary_utils.entities import Island
 
 
 def normalized(x: List[float], temp: float = 1):
-    x = np.array(x)
-    return np.exp(x / temp) / np.sum(np.exp(x / temp), axis=0)
+    x = np.asarray(x, dtype=np.float64)
+    if x.size == 0:
+        return x
+    if temp <= 0:
+        raise ValueError(f"Temperature must be > 0, got {temp}")
+    scaled = x / temp
+    scaled = scaled - np.max(scaled)
+    exps = np.exp(scaled)
+    total = np.sum(exps, axis=0)
+    if not np.isfinite(total) or total <= 0:
+        return np.full_like(exps, fill_value=1.0 / len(exps))
+    return exps / total
 
 
 class RevolveDatabase:
@@ -237,37 +247,66 @@ class RevolveDatabase:
             operator: "mutation" or "crossover"
             parent_checkpoint_path: path to the fittest parent's U2O checkpoint, or None
         """
-        # sample uniformly in the first k generations (for better exploration)
-        average_fitness_scores = normalized(
-            [
-                self._islands[island_id].average_fitness_score
-                for island_id in range(self.num_islands)
-            ],
-            temperature,
-        )
-
         # make mutation more likely leading to utilizing current islands
         operator = "mutation" if random.random() >= self.crossover_prob else "crossover"
-        num_in_context_samples = (
+        required_samples = (
             num_samples["mutation"]
             if operator == "mutation"
             else num_samples["crossover"]
         )
 
-        # STEP 1: sample an island
-        # corner case: for crossover, the island size must be >= 2
-        size_of_sample_island = 0
-        # TODO: getting trapped in the while loop in the initial phases
-        while size_of_sample_island < num_in_context_samples:
-            sampled_island_id, sampled_island = random.choices(
-                list(enumerate(self._islands)), weights=average_fitness_scores
+        # Avoid deadlock: fallback crossover -> mutation if no island has enough individuals.
+        eligible = [
+            (island_id, island)
+            for island_id, island in enumerate(self._islands)
+            if island.size >= required_samples
+        ]
+        if not eligible and operator == "crossover":
+            operator = "mutation"
+            required_samples = num_samples["mutation"]
+            eligible = [
+                (island_id, island)
+                for island_id, island in enumerate(self._islands)
+                if island.size >= required_samples
+            ]
+
+        if not eligible:
+            non_empty = [
+                (island_id, island)
+                for island_id, island in enumerate(self._islands)
+                if island.size > 0
+            ]
+            if not non_empty:
+                raise RuntimeError(
+                    "No individuals available in any island to sample in-context examples."
+                )
+            candidate_scores = [island.average_fitness_score for _, island in non_empty]
+            sampled_idx = random.choices(
+                list(range(len(non_empty))),
+                weights=normalized(candidate_scores, temperature),
+                k=1,
             )[0]
-            size_of_sample_island = sampled_island.size
+            sampled_island_id, sampled_island = non_empty[sampled_idx]
+            required_samples = min(required_samples, sampled_island.size)
+        else:
+            candidate_scores = [island.average_fitness_score for _, island in eligible]
+            sampled_idx = random.choices(
+                list(range(len(eligible))),
+                weights=normalized(candidate_scores, temperature),
+                k=1,
+            )[0]
+            sampled_island_id, sampled_island = eligible[sampled_idx]
+
+        if required_samples <= 0:
+            raise RuntimeError(
+                f"Invalid in-context sample size ({required_samples}) for operator {operator}."
+            )
+
         # STEP 2: sample without replacement num_samples generated_fns
         in_context_sample_ids = np.random.choice(
             range(sampled_island.size),
             p=normalized(sampled_island.fitness_scores, temperature),
-            size=num_in_context_samples,
+            size=required_samples,
             replace=False,
         )
         in_context_samples = list(

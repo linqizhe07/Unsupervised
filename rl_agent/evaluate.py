@@ -1,6 +1,8 @@
 import json
 import logging
 
+INVALID_FITNESS = -1e9
+
 
 def read_values(file_path):
     values = []
@@ -18,7 +20,7 @@ def read_values(file_path):
 
 def calculate_average_around_max(values, window=1000):
     if len(values) == 0:
-        return None
+        return None, None
 
     max_index = values.index(max(values))
     start_index = max(0, max_index - window)
@@ -30,4 +32,9 @@ def calculate_average_around_max(values, window=1000):
 def return_score(file_path):
     values = read_values(file_path)
     average, max_index = calculate_average_around_max(values)
+    if average is None:
+        logging.error(
+            f"Empty or invalid velocity log in {file_path}; returning fallback fitness {INVALID_FITNESS}."
+        )
+        return INVALID_FITNESS
     return average
