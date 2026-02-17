@@ -111,10 +111,10 @@ def pretrain(
     discount: float = 0.98,
     future: float = 0.99,
     p_randomgoal: float = 0.375,
-    collection_episodes: int = 5000,
-    pretrain_steps: int = 1000000,
-    max_episode_steps: int = 1000,
-    max_buffer_episodes: int = 10000,
+    collection_episodes: int = 2000,
+    pretrain_steps: int = 500000,
+    max_episode_steps: int = 500,
+    max_buffer_episodes: int = 2000,
     eval_every: int = 500000,
     log_every: int = 1000,
     seed: int = 0,
@@ -221,6 +221,10 @@ def pretrain(
 
     timer = utils.Timer()
 
+    import psutil
+    import gc
+    process = psutil.Process()
+
     for step in range(1, pretrain_steps + 1):
         # Update agent (unsupervised, no task reward)
         metrics = agent.update(replay_buffer, step, with_reward=False)
@@ -233,6 +237,10 @@ def pretrain(
             for key in ["sf_loss", "phi_loss", "actor_loss", "reward"]:
                 if key in metrics:
                     log_str += f" | {key}: {metrics[key]:.4f}"
+            # Memory monitoring
+            rss_mb = process.memory_info().rss / 1024 / 1024
+            gpu_mb = torch.cuda.memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0
+            log_str += f" | RAM: {rss_mb:.0f}MB | GPU: {gpu_mb:.0f}MB"
             print(log_str)
 
             if use_wandb:
@@ -286,9 +294,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--discount", type=float, default=0.98)
     parser.add_argument("--future", type=float, default=0.99)
-    parser.add_argument("--collection_episodes", type=int, default=5000)
-    parser.add_argument("--pretrain_steps", type=int, default=1000000)
-    parser.add_argument("--max_episode_steps", type=int, default=1000)
+    parser.add_argument("--collection_episodes", type=int, default=2000)
+    parser.add_argument("--pretrain_steps", type=int, default=500000)
+    parser.add_argument("--max_episode_steps", type=int, default=500)
     parser.add_argument("--eval_every", type=int, default=500000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", type=str, default=None)

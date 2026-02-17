@@ -502,18 +502,17 @@ class SFAgent:
                 with torch.no_grad():
                     phi = self._get_phi(next_obs[perm], obs[perm])
 
-                # Recompute inv_cov periodically (pinv is expensive)
-                if step % self.cfg.update_cov_every_step == 0:
-                    cov = torch.matmul(phi.T, phi) / phi.shape[0]
-                    cov = cov + 1e-4 * torch.eye(cov.shape[0], device=cov.device)
-                    self.inv_cov = torch.linalg.pinv(cov)
+                # compute inverse of cov of phi
+                cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                inv_cov = torch.linalg.pinv(cov)
 
                 mix_idxs: tp.Any = np.where(
                     np.random.uniform(size=self.cfg.batch_size) < self.cfg.mix_ratio
                 )[0]
                 with torch.no_grad():
                     new_z = phi[mix_idxs]
-                new_z = torch.matmul(new_z, self.inv_cov)
+
+                new_z = torch.matmul(new_z, inv_cov)
                 new_z = math.sqrt(self.cfg.z_dim) * F.normalize(new_z, dim=1)
                 z[mix_idxs] = new_z
 
@@ -591,17 +590,17 @@ class SFAgent:
                 with torch.no_grad():
                     phi = self._get_phi(next_obs[perm], obs[perm])
 
-                if step % self.cfg.update_cov_every_step == 0:
-                    cov = torch.matmul(phi.T, phi) / phi.shape[0]
-                    cov = cov + 1e-4 * torch.eye(cov.shape[0], device=cov.device)
-                    self.inv_cov = torch.linalg.pinv(cov)
+                # compute inverse of cov of phi
+                cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                inv_cov = torch.linalg.pinv(cov)
 
                 mix_idxs = np.where(
                     np.random.uniform(size=self.cfg.batch_size) < self.cfg.mix_ratio
                 )[0]
                 with torch.no_grad():
                     new_z = phi[mix_idxs]
-                new_z = torch.matmul(new_z, self.inv_cov)
+
+                new_z = torch.matmul(new_z, inv_cov)
                 new_z = math.sqrt(self.cfg.z_dim) * F.normalize(new_z, dim=1)
                 z[mix_idxs] = new_z
 

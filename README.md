@@ -59,10 +59,10 @@ python -m u2o.pretrain \
         --phi_hidden_dim 1024 \
         --feature_dim 1024 \
         --feature_learner hilp \
-        --collection_episodes 10000 \
-        --pretrain_steps 3000000 \
+        --collection_episodes 2000 \
+        --pretrain_steps 500000 \
         --batch_size 2048 \
-        --wandb_project revolve-u2o
+        --wandb_project revolve-u2o-2
 ```
 
 | Output File | Description |
@@ -169,8 +169,8 @@ Pretrain script arguments:
 | `--phi_hidden_dim` | `1024` | Feature network hidden size |
 | `--feature_dim` | `1024` | Feature output dimension |
 | `--feature_learner` | `hilp` | Feature learning method (hilp, laplacian, contrastive, icm, etc.) |
-| `--collection_episodes` | `10000` | Episodes of random data to collect |
-| `--pretrain_steps` | `5000000` | Offline training steps |
+| `--collection_episodes` | `2000` | Episodes of random data to collect |
+| `--pretrain_steps` | `500000` | Offline training steps |
 | `--batch_size` | `2048` | Batch size for training |
 | `--lr` | `1e-4` | Learning rate |
 | `--discount` | `0.98` | MDP discount factor |
