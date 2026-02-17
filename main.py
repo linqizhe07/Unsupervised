@@ -179,6 +179,7 @@ def main(cfg):
                 island_id = random.choice(range(rewards_database.num_islands))
                 in_context_samples = (None, None)
                 operator_prompt = ""
+                parent_checkpoint_path = None
                 logging.info(
                     f"Generation {generation_id}, Counter {counter_id}: island_id={island_id}, type={type(island_id)}"
                 )
@@ -188,6 +189,7 @@ def main(cfg):
                     in_context_samples,
                     island_id,
                     operator,
+                    parent_checkpoint_path,
                 ) = rewards_database.sample_in_context(
                     cfg.few_shot, temperature
                 )  # weighted sampling of islands and corresponding individuals
@@ -224,6 +226,7 @@ def main(cfg):
                     policy.enable_u2o(
                         pretrained_dir=u2o_pretrained_dir,
                         u2o_cfg=u2o_cfg,
+                        parent_checkpoint_path=parent_checkpoint_path,
                     )
                 policies.append(policy)
                 rew_fn_strings.append(reward_func_str)

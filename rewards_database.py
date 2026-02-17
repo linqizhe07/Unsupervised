@@ -1,7 +1,7 @@
 import os
 import random
 import sys
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 
 import numpy as np
 from absl import logging
@@ -225,11 +225,17 @@ class RevolveDatabase:
 
     def sample_in_context(
         self, num_samples: Dict, temperature: float
-    ) -> Tuple[List[Tuple[str, float]], int, str]:
+    ) -> Tuple[List[Tuple[str, float]], int, str, Optional[str]]:
         """
         returns a tuple of sampled generated_fns and its corresponding island
         selecting the islands to mutate/crossover based on average fitness score
         this ensures that the islands explore + exploit
+
+        Returns:
+            in_context_samples: list of (fn_path, fitness_score)
+            sampled_island_id: id of the sampled island
+            operator: "mutation" or "crossover"
+            parent_checkpoint_path: path to the fittest parent's U2O checkpoint, or None
         """
         # sample uniformly in the first k generations (for better exploration)
         average_fitness_scores = normalized(
@@ -270,9 +276,16 @@ class RevolveDatabase:
                 np.array(sampled_island.fitness_scores)[in_context_sample_ids],
             )
         )
+
+        # STEP 3: pick the fittest parent's checkpoint for policy inheritance
+        sampled_individuals = [sampled_island.individuals[i] for i in in_context_sample_ids]
+        best_parent = max(sampled_individuals, key=lambda ind: ind.fitness_score)
+        parent_ckpt = best_parent.u2o_checkpoint_path
+        parent_checkpoint_path = parent_ckpt if os.path.exists(parent_ckpt) else None
+
         # each sample in 'in_context_samples' is a tuple of (fn_path: str, fitness_score: float)
         logging.info(f"{operator.capitalize()} | sampled island: {sampled_island_id}")
-        return in_context_samples, sampled_island_id, operator
+        return in_context_samples, sampled_island_id, operator, parent_checkpoint_path
 
     @staticmethod
     def delete_file(filepath: str, filetype: str):

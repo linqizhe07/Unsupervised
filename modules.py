@@ -147,15 +147,17 @@ class TrainPolicy:
         self.u2o_enabled = False
         self.pretrained_dir = None
         self.u2o_cfg = {}
+        self.parent_checkpoint_path = None
         logging.info(
             f"Initializing TrainPolicy: generation_id={generation_id}, island_id={island_id}, type(island_id)={type(island_id)}"
         )
 
-    def enable_u2o(self, pretrained_dir: str, u2o_cfg: dict = None):
+    def enable_u2o(self, pretrained_dir: str, u2o_cfg: dict = None, parent_checkpoint_path: str = None):
         """Enable U2O mode: SFAgent skill inference + fine-tune."""
         self.u2o_enabled = True
         self.pretrained_dir = pretrained_dir
         self.u2o_cfg = u2o_cfg or {}
+        self.parent_checkpoint_path = parent_checkpoint_path
 
     def _load_train_cfg(self):
         logging.info("Loading train cfg")
@@ -228,6 +230,7 @@ class TrainPolicy:
                 log_dir,
                 pretrained_dir=self.pretrained_dir,
                 u2o_cfg=self.u2o_cfg,
+                parent_checkpoint_path=self.parent_checkpoint_path,
             )
         else:
             # Original path: from-scratch training

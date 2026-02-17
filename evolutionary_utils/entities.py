@@ -68,6 +68,14 @@ class Individual:
         )
 
     @property
+    def u2o_checkpoint_path(self):
+        """U2O fine-tuned checkpoint path"""
+        return (
+            f"{self.reward_fn_dir}/island_{self.island_id}/model_checkpoints/"
+            f"u2o_final_{self.generation_id}_{self.counter_id}.pt"
+        )
+
+    @property
     def human_feedback_path(self):
         """human feedback path"""
         return (

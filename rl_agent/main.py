@@ -206,11 +206,12 @@ def run_training_u2o(
     log_dir,
     pretrained_dir,
     u2o_cfg,
+    parent_checkpoint_path=None,
 ):
     """
     U2O version of run_training using SFAgent with successor features.
 
-    1. Load pretrained SFAgent and replay buffer
+    1. Load pretrained (or parent) SFAgent and replay buffer
     2. Create HumanoidEnv with LLM reward
     3. Infer skill z* from task reward via least-squares on phi
     4. Fine-tune with online data collection + offline data mixing
@@ -248,11 +249,16 @@ def run_training_u2o(
     )
     agent = SFAgent(cfg)
 
-    # Load pretrained weights
-    agent_path = os.path.join(pretrained_dir, "agent_checkpoint.pt")
-    agent.load(agent_path)
-    agent.cfg.num_expl_steps = 0  # no random exploration during finetuning
-    print(f"[U2O] Loaded pretrained agent from {agent_path}")
+    # Load weights: parent checkpoint if available, otherwise pretrained
+    if parent_checkpoint_path and os.path.exists(parent_checkpoint_path):
+        agent.load(parent_checkpoint_path)
+        agent.cfg.num_expl_steps = 0
+        print(f"[U2O] Loaded PARENT checkpoint from {parent_checkpoint_path}")
+    else:
+        agent_path = os.path.join(pretrained_dir, "agent_checkpoint.pt")
+        agent.load(agent_path)
+        agent.cfg.num_expl_steps = 0
+        print(f"[U2O] Loaded pretrained agent from {agent_path}")
 
     # Load offline replay buffer
     offline_buffer = ReplayBuffer(
