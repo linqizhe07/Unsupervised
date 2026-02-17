@@ -225,6 +225,58 @@ class AutoEncoder(FeatureLearner):
         return reconstruction_error
 
 
+class RNDNetwork(nn.Module):
+    """Random Network Distillation for exploration.
+
+    Target network has fixed random weights. Predictor is trained to match it.
+    Intrinsic reward = MSE(target(obs), predictor(obs)).
+    Novel states have high prediction error → high intrinsic reward.
+    """
+
+    def __init__(self, obs_dim: int, embedding_dim: int = 128, hidden_dim: int = 256):
+        super().__init__()
+        # Target: fixed random weights, never trained
+        self.target = mlp(obs_dim, hidden_dim, "relu", hidden_dim, "relu", embedding_dim)
+        for p in self.target.parameters():
+            p.requires_grad = False
+        # Predictor: deeper than target (standard RND practice)
+        self.predictor = mlp(
+            obs_dim, hidden_dim, "relu", hidden_dim, "relu", hidden_dim, "relu", embedding_dim
+        )
+        self.predictor.apply(utils.weight_init)
+
+    def intrinsic_reward(self, obs: torch.Tensor) -> torch.Tensor:
+        """Compute intrinsic reward = per-sample MSE between target and predictor."""
+        with torch.no_grad():
+            target_out = self.target(obs)
+        predictor_out = self.predictor(obs)
+        return ((target_out - predictor_out) ** 2).mean(dim=-1)
+
+    def loss(self, obs: torch.Tensor) -> torch.Tensor:
+        """Compute predictor loss for training."""
+        with torch.no_grad():
+            target_out = self.target(obs)
+        predictor_out = self.predictor(obs)
+        return ((target_out - predictor_out) ** 2).mean()
+
+
+class ExplorationActor(nn.Module):
+    """Lightweight Gaussian policy for RND-guided exploration."""
+
+    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int = 256):
+        super().__init__()
+        self.net = mlp(obs_dim, hidden_dim, "relu", hidden_dim, "relu", action_dim * 2)
+        self.action_dim = action_dim
+        self.apply(utils.weight_init)
+
+    def forward(self, obs: torch.Tensor) -> torch.distributions.Normal:
+        out = self.net(obs)
+        mean, log_std = out.chunk(2, dim=-1)
+        mean = torch.tanh(mean)
+        log_std = torch.clamp(log_std, -5.0, 0.5)
+        return torch.distributions.Normal(mean, log_std.exp())
+
+
 # Registry of all feature learners
 FEATURE_LEARNERS = {
     "hilp": HILP,

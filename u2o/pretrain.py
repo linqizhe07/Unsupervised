@@ -30,7 +30,7 @@ if root_path not in sys.path:
     sys.path.insert(0, root_path)
 
 from rl_agent.HumanoidEnv import HumanoidEnv
-from u2o.agent import SFAgent, SFAgentConfig
+from u2o.agent import SFAgent, SFAgentConfig, RunningMeanStd
 from u2o.replay_buffer import ReplayBuffer
 from u2o import utils
 
@@ -97,6 +97,137 @@ def collect_random_data(
     return total_steps
 
 
+def collect_rnd_data(
+    env: HumanoidEnv,
+    replay_buffer: ReplayBuffer,
+    num_episodes: int,
+    max_episode_steps: int = 500,
+    device: str = "cpu",
+    rnd_lr: float = 1e-3,
+    actor_lr: float = 3e-4,
+    random_warmup_episodes: int = 50,
+    actor_update_every: int = 10,
+) -> int:
+    """Collect exploration data guided by RND intrinsic rewards.
+
+    Uses a lightweight REINFORCE actor trained to maximize RND novelty.
+    The RND predictor is updated after each episode so visited states
+    become less novel, pushing the actor toward unexplored regions.
+    """
+    from u2o.networks import RNDNetwork, ExplorationActor
+
+    obs_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
+
+    rnd = RNDNetwork(obs_dim, embedding_dim=128, hidden_dim=256).to(device)
+    rnd_opt = torch.optim.Adam(rnd.predictor.parameters(), lr=rnd_lr)
+
+    actor = ExplorationActor(obs_dim, action_dim, hidden_dim=256).to(device)
+    actor_opt = torch.optim.Adam(actor.parameters(), lr=actor_lr)
+
+    obs_rms = RunningMeanStd(obs_dim, device=device)
+    rew_rms = RunningMeanStd(1, device=device)
+
+    total_steps = 0
+    recent_intrinsic = []
+
+    for ep in range(num_episodes):
+        obs, info = env.reset()
+        done = False
+        step = 0
+        ep_obs_list = []
+        ep_logprobs = []
+        ep_intrinsic = []
+
+        while not done and step < max_episode_steps:
+            obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+            obs_rms.update(obs_t)
+            norm_obs = obs_rms.normalize(obs_t)
+
+            if ep < random_warmup_episodes:
+                action = env.action_space.sample()
+                log_prob = None
+            else:
+                with torch.no_grad():
+                    dist = actor(norm_obs)
+                    action_t = dist.sample()
+                    log_prob = dist.log_prob(action_t).sum(-1)
+                    action = action_t.squeeze(0).cpu().numpy()
+                    action = np.clip(action, -1.0, 1.0)
+
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+
+            with torch.no_grad():
+                intrinsic_r = rnd.intrinsic_reward(norm_obs).item()
+
+            replay_buffer.add_transition(
+                obs=obs,
+                action=action,
+                reward=intrinsic_r,
+                next_obs=next_obs,
+                done=done,
+                discount=0.0 if terminated else 1.0,
+            )
+
+            ep_obs_list.append(norm_obs.squeeze(0))
+            if log_prob is not None:
+                ep_logprobs.append(log_prob)
+            ep_intrinsic.append(intrinsic_r)
+
+            obs = next_obs
+            step += 1
+            total_steps += 1
+
+        if not done:
+            replay_buffer._store_episode()
+
+        # Update RND predictor on episode observations
+        if ep_obs_list:
+            obs_batch = torch.stack(ep_obs_list)
+            rnd_loss = rnd.loss(obs_batch)
+            rnd_opt.zero_grad()
+            rnd_loss.backward()
+            rnd_opt.step()
+
+        # REINFORCE update on actor (after warmup, every K episodes)
+        if (
+            ep >= random_warmup_episodes
+            and (ep - random_warmup_episodes) % actor_update_every == 0
+            and ep_logprobs
+        ):
+            rewards_t = torch.tensor(ep_intrinsic[-len(ep_logprobs):], device=device)
+            rew_rms.update(rewards_t.unsqueeze(-1))
+            rewards_t = (rewards_t - rew_rms.mean.squeeze()) / (
+                torch.sqrt(rew_rms.var.squeeze()) + 1e-8
+            )
+            # Discounted returns
+            returns = torch.zeros_like(rewards_t)
+            G = 0.0
+            for i in range(len(rewards_t) - 1, -1, -1):
+                G = rewards_t[i].item() + 0.99 * G
+                returns[i] = G
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+
+            log_probs = torch.stack(ep_logprobs).squeeze()
+            policy_loss = -(log_probs * returns).mean()
+            actor_opt.zero_grad()
+            policy_loss.backward()
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), max_norm=1.0)
+            actor_opt.step()
+
+        recent_intrinsic.append(np.mean(ep_intrinsic) if ep_intrinsic else 0)
+
+        if (ep + 1) % 100 == 0:
+            avg_r = np.mean(recent_intrinsic[-100:])
+            print(
+                f"[RND] Episode {ep + 1}/{num_episodes} | "
+                f"Steps: {total_steps} | Avg intrinsic reward: {avg_r:.4f}"
+            )
+
+    return total_steps
+
+
 def pretrain(
     output_dir: str,
     z_dim: int = 50,
@@ -119,6 +250,7 @@ def pretrain(
     log_every: int = 1000,
     seed: int = 0,
     device: str = None,
+    exploration: str = "random",
     wandb_project: str = None,
     wandb_entity: str = None,
     wandb_run_name: str = None,
@@ -126,7 +258,7 @@ def pretrain(
     """
     Complete U2O pretraining pipeline with custom training loop.
 
-    Phase 1: Random data collection (fill replay buffer)
+    Phase 1: Data collection (random or RND-guided)
     Phase 2: Offline pretraining (train SFAgent on collected data)
     """
     if device is None:
@@ -156,6 +288,7 @@ def pretrain(
         "p_randomgoal": p_randomgoal,
         "collection_episodes": collection_episodes,
         "pretrain_steps": pretrain_steps,
+        "exploration": exploration,
         "seed": seed,
     }
 
@@ -190,11 +323,17 @@ def pretrain(
     # ============================================================
     # Phase 1: Data Collection
     # ============================================================
-    print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
     env = create_dummy_humanoid_env()
-    total_collected = collect_random_data(
-        env, replay_buffer, collection_episodes, max_episode_steps
-    )
+    if exploration == "rnd":
+        print(f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---")
+        total_collected = collect_rnd_data(
+            env, replay_buffer, collection_episodes, max_episode_steps, device=device
+        )
+    else:
+        print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
+        total_collected = collect_random_data(
+            env, replay_buffer, collection_episodes, max_episode_steps
+        )
     print(f"Collected {total_collected} transitions in {len(replay_buffer)} episodes")
 
     # ============================================================
@@ -299,6 +438,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_episode_steps", type=int, default=500)
     parser.add_argument("--eval_every", type=int, default=500000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--exploration", type=str, default="random", choices=["random", "rnd"])
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default=None)
     parser.add_argument("--wandb_entity", type=str, default=None)
@@ -322,6 +462,7 @@ if __name__ == "__main__":
         pretrain_steps=args.pretrain_steps,
         max_episode_steps=args.max_episode_steps,
         eval_every=args.eval_every,
+        exploration=args.exploration,
         seed=args.seed,
         device=args.device,
         wandb_project=args.wandb_project,

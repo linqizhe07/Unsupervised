@@ -54,7 +54,7 @@ Pretrain an SFAgent with HILP feature learning and successor features. The agent
 export ROOT_PATH='Revolve'
 python -m u2o.pretrain \
         --output_dir ./u2o_pretrained \
-        --z_dim 100 \
+        --z_dim 50 \
         --hidden_dim 2048 \
         --phi_hidden_dim 1024 \
         --feature_dim 1024 \
