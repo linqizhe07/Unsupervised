@@ -81,8 +81,8 @@ python main.py \
         u2o.enabled=true \
         u2o.pretrained_dir=./u2o_pretrained \
         evolution.num_generations=5 \
-        evolution.individuals_per_generation=15 \
-        database.num_islands=5 \
+        evolution.individuals_per_generation=9 \
+        database.num_islands=3 \
         database.max_island_size=8 \
         data_paths.run=10 \
         environment.name="HumanoidEnv"
