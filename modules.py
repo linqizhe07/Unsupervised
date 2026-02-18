@@ -280,13 +280,17 @@ class RewardFunctionEvaluation:
 
 def train_policies_in_parallel(
         policy_classes: List[TrainPolicy],
+        max_workers: int = None,
 ) -> List[Tuple[str, str]]:
     """
     submit multiple training policies in parallel
+    max_workers: limit parallel processes to avoid OOM (None = all at once)
     """
     multiprocessing.set_start_method("spawn", force=True)
+    if max_workers is None:
+        max_workers = len(policy_classes)
     with concurrent.futures.ProcessPoolExecutor(
-            max_workers=len(policy_classes)
+            max_workers=max_workers
     ) as executor:
         futures = [
             executor.submit(policy_class.train_policy)

@@ -293,9 +293,10 @@ def main(cfg):
         if len(policies) == 0:
             logging.info("No valid reward functions. Hence, no policy trains required.")
             continue
-        # train policies in parallel
-        logging.info(f"Training {len(policies)} policies in parallel.")
-        ckpt_and_performance_paths = train_policies_in_parallel(policies)
+        # train policies in parallel (limit concurrency to avoid OOM)
+        max_parallel = cfg.database.get("num_gpus", 1)
+        logging.info(f"Training {len(policies)} policies ({max_parallel} at a time).")
+        ckpt_and_performance_paths = train_policies_in_parallel(policies, max_workers=max_parallel)
         logging.info("Policy training finished.")
 
         # evaluate performance for generated reward functions
