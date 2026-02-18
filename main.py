@@ -131,7 +131,9 @@ def main(cfg):
             wandb_run = wandb.init(
                 project=wandb_cfg.get("project", "revolve"),
                 entity=wandb_cfg.get("entity"),
-                name=run_name,
+                group=run_name,
+                name=f"{run_name}_evolution",
+                job_type="evolution",
                 config={
                     "baseline": cfg.evolution.baseline,
                     "num_generations": cfg.evolution.num_generations,
@@ -264,7 +266,7 @@ def main(cfg):
                         ft_wandb_cfg = {
                             "project": wandb_cfg.get("project", "revolve"),
                             "entity": wandb_cfg.get("entity"),
-                            "group": wandb_run.group or wandb_run.name,
+                            "group": wandb_run.group,
                         }
                     policy.enable_u2o(
                         pretrained_dir=u2o_pretrained_dir,

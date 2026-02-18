@@ -238,7 +238,8 @@ def run_training_u2o(
                 entity=wandb_cfg.get("entity"),
                 group=wandb_cfg.get("group"),
                 name=f"finetune_g{generation_id}_c{counter}_i{island_id}",
-                reinit=True,
+                job_type="finetune",
+                reinit="finish_previous",
             )
         except Exception as e:
             print(f"[wandb] Failed to init in subprocess: {e}")
