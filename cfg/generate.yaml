@@ -23,7 +23,7 @@ database:
 evolution:
   num_generations: 7  # number of iterations T
   baseline: revolve_auto  # revolve, revolve_auto, eureka, eureka_auto
-  individuals_per_generation: 15  # number of individuals in each generation
+  individuals_per_generation: 16  # number of individuals in each generation
 
 few_shot:
   mutation: 1  # few-shot prompting for mutation
