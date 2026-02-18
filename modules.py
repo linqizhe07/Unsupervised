@@ -10,7 +10,7 @@ import json
 import multiprocessing
 import os
 import time
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, List
 
 import absl.logging as logging
 import hydra
