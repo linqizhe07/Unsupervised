@@ -337,6 +337,7 @@ def run_training_u2o(
         max_episodes=1000,
         discount=pretrain_config.get("discount", 0.98),
         future=1.0,
+        max_episode_length=1000,
     )
 
     # Fine-tuning loop
