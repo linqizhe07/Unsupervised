@@ -17,7 +17,7 @@ database:
   migration_prob: 0.3  # probability of resetting weaker islands with seeds migrated from other islands
   # sampling hyperparameters
   initial_temp: 1  # start with a higher temperature for uniform sampling (exploration)
-  final_temp: 1  # exploitation
+  final_temp: 0.6  # exploitation
   num_gpus: 4  # number of gpus to train policies on using parallel processing
 
 evolution:
