@@ -39,7 +39,7 @@ environment:
 
 wandb:
   enabled: True
-  project: "revolve"
+  project: "revolve2"
   entity: null
   run_name: null  # auto-generated if null
 
