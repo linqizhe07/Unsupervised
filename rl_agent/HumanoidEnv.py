@@ -414,7 +414,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
     @property
     def terminated(self):
         terminated = (not self.is_healthy) if self._terminate_when_unhealthy else False
-        if self.total_steps > 1000:
+        if self.total_steps >= 1000:
             terminated = True
             self.total_steps = 0
         return terminated
