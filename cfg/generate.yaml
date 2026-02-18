@@ -37,6 +37,12 @@ data_paths:
 environment:
   name: "HumanoidEnv"  # Choose between "HumanoidEnv" or "AdroitHandDoorEnv"
 
+wandb:
+  enabled: True
+  project: "revolve"
+  entity: null
+  run_name: null  # auto-generated if null
+
 u2o:
   enabled: false  # set to true to use U2O pretraining
   pretrained_dir: ${root_dir}/u2o_pretrained

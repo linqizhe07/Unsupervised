@@ -207,6 +207,7 @@ def run_training_u2o(
     pretrained_dir,
     u2o_cfg,
     parent_checkpoint_path=None,
+    wandb_cfg=None,
 ):
     """
     U2O version of run_training using SFAgent with successor features.
@@ -226,6 +227,22 @@ def run_training_u2o(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_checkpoint_file, exist_ok=True)
+
+    # Initialize wandb for this fine-tune run (subprocess)
+    wb_run = None
+    if wandb_cfg is not None:
+        try:
+            import wandb
+            wb_run = wandb.init(
+                project=wandb_cfg["project"],
+                entity=wandb_cfg.get("entity"),
+                group=wandb_cfg.get("group"),
+                name=f"finetune_g{generation_id}_c{counter}_i{island_id}",
+                reinit=True,
+            )
+        except Exception as e:
+            print(f"[wandb] Failed to init in subprocess: {e}")
+            wb_run = None
 
     # Load pretrained config
     config_path = os.path.join(pretrained_dir, "pretrain_config.json")
@@ -325,7 +342,9 @@ def run_training_u2o(
     obs, info = env.reset()
     episode_reward = 0.0
     episode_count = 0
+    episode_step = 0
     velocity_log = []
+    log_every = 200
 
     os.makedirs(os.path.dirname(velocity_file), exist_ok=True)
 
@@ -341,25 +360,39 @@ def run_training_u2o(
         )
 
         episode_reward += reward
+        episode_step += 1
         if "x_velocity" in info:
             velocity_log.append(info["x_velocity"])
 
         if done:
             episode_count += 1
+            if wb_run is not None:
+                wb_run.log({
+                    "finetune/episode_reward": episode_reward,
+                    "finetune/episode_length": episode_step,
+                    "finetune/episode_count": episode_count,
+                    "finetune/x_velocity": info.get("x_velocity", 0),
+                }, step=step)
             obs, info = env.reset()
             episode_reward = 0.0
+            episode_step = 0
         else:
             obs = next_obs
 
         # Update agent with mixed online + offline data
         if len(online_buffer) >= 2 and step % cfg.update_every_steps == 0:
-            agent.update_with_offline_data(
+            metrics = agent.update_with_offline_data(
                 replay_loader=online_buffer,
                 step=step,
                 with_reward=True,
                 meta=meta,
                 replay_loader_offline=offline_buffer,
             )
+            if wb_run is not None and step % log_every == 0 and metrics:
+                wb_run.log(
+                    {f"finetune/{k}": v for k, v in metrics.items()},
+                    step=step,
+                )
 
         # Periodic checkpoint
         if step % 500 == 0:
@@ -383,3 +416,6 @@ def run_training_u2o(
     print(
         f"[U2O] Fine-tuning complete: {episode_count} episodes, {finetune_steps} steps"
     )
+
+    if wb_run is not None:
+        wb_run.finish()

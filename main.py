@@ -3,6 +3,8 @@ import sys
 import traceback
 from typing import Optional, Tuple, List, Callable
 
+import numpy as np
+
 sys.path.append(os.environ["ROOT_PATH"])
 from rewards_database import RevolveDatabase, EurekaDatabase
 from modules import *
@@ -117,6 +119,35 @@ def main(cfg):
         }
         print(f"U2O mode enabled. Pretrained dir: {u2o_pretrained_dir}")
 
+    # Initialize wandb
+    wandb_run = None
+    wandb_cfg = cfg.get("wandb", {})
+    if wandb_cfg.get("enabled", False):
+        try:
+            import wandb
+            run_name = wandb_cfg.get("run_name") or (
+                f"{cfg.evolution.baseline}_run{cfg.data_paths.run}"
+            )
+            wandb_run = wandb.init(
+                project=wandb_cfg.get("project", "revolve"),
+                entity=wandb_cfg.get("entity"),
+                name=run_name,
+                config={
+                    "baseline": cfg.evolution.baseline,
+                    "num_generations": cfg.evolution.num_generations,
+                    "individuals_per_generation": cfg.evolution.individuals_per_generation,
+                    "num_islands": cfg.database.num_islands,
+                    "max_island_size": cfg.database.max_island_size,
+                    "crossover_prob": cfg.database.crossover_prob,
+                    "migration_prob": cfg.database.migration_prob,
+                    "u2o_enabled": u2o_enabled,
+                },
+            )
+            print(f"[wandb] Initialized: {wandb_run.url}")
+        except ImportError:
+            logging.warning("wandb not installed; disabling wandb logging.")
+            wandb_run = None
+
     system_prompt = prompts.types["system_prompt"]
     env_input_prompt = prompts.types["env_input_prompt"]
 
@@ -227,10 +258,19 @@ def main(cfg):
                     cfg.database.rewards_dir,
                 )
                 if u2o_enabled:
+                    # Build wandb config for fine-tune subprocess logging
+                    ft_wandb_cfg = None
+                    if wandb_run is not None:
+                        ft_wandb_cfg = {
+                            "project": wandb_cfg.get("project", "revolve"),
+                            "entity": wandb_cfg.get("entity"),
+                            "group": wandb_run.group or wandb_run.name,
+                        }
                     policy.enable_u2o(
                         pretrained_dir=u2o_pretrained_dir,
                         u2o_cfg=u2o_cfg,
                         parent_checkpoint_path=parent_checkpoint_path,
+                        wandb_cfg=ft_wandb_cfg,
                     )
                 policies.append(policy)
                 island_ids.append(island_id)
@@ -295,6 +335,43 @@ def main(cfg):
             for island_id, island in enumerate(rewards_database._islands)
         ]
         tracker.log({"generation": generation_id, "islands": island_info})
+
+        # wandb logging
+        if wandb_run is not None:
+            all_island_scores = [
+                island.fitness_scores for island in rewards_database._islands
+                if island.size > 0
+            ]
+            all_scores_flat = [s for scores in all_island_scores for s in scores]
+
+            log_dict = {
+                "generation": generation_id,
+                "temperature": temperature,
+                # current generation stats
+                "gen/num_individuals": len(fitness_scores),
+                "gen/mean_fitness": float(np.mean(fitness_scores)) if fitness_scores else 0,
+                "gen/max_fitness": float(np.max(fitness_scores)) if fitness_scores else 0,
+                "gen/min_fitness": float(np.min(fitness_scores)) if fitness_scores else 0,
+                "gen/std_fitness": float(np.std(fitness_scores)) if fitness_scores else 0,
+                # global stats across all islands
+                "global/best_fitness": float(np.max(all_scores_flat)) if all_scores_flat else 0,
+                "global/mean_fitness": float(np.mean(all_scores_flat)) if all_scores_flat else 0,
+                "global/total_individuals": sum(
+                    island.size for island in rewards_database._islands
+                ),
+            }
+
+            # per-island stats
+            for iid, island in enumerate(rewards_database._islands):
+                if island.size > 0:
+                    log_dict[f"island_{iid}/best_fitness"] = island.best_fitness_score
+                    log_dict[f"island_{iid}/avg_fitness"] = float(island.average_fitness_score)
+                    log_dict[f"island_{iid}/size"] = island.size
+
+            wandb_run.log(log_dict, step=generation_id)
+
+    if wandb_run is not None:
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

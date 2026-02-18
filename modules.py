@@ -24,7 +24,9 @@ from rl_agent.main import run_training
 from utils import parse_llm_output, serialize_dict, format_human_feedback
 
 openai_api_key = os.environ["OPENAI_API_KEY"]
-client = OpenAI(api_key=openai_api_key)
+client = OpenAI(
+    api_key=openai_api_key,
+    base_url = "https://api.probex.top/v1")
 
 
 # generates reward functions
@@ -33,7 +35,7 @@ class RewardFunctionGeneration:
         # TODO: change system message based on Eureka
         self.system_prompt = system_prompt
         self.env_input = env_input  # env_class + task
-        self.llm = "gpt-4-1106-preview"
+        self.llm = "Qwen3-Coder-480B-A35B-Instruct"
 
     def query_llm(self, in_context_prompt: str) -> Tuple[str, int, int]:
         response = client.chat.completions.create(
@@ -148,16 +150,20 @@ class TrainPolicy:
         self.pretrained_dir = None
         self.u2o_cfg = {}
         self.parent_checkpoint_path = None
+        # wandb config for fine-tune logging
+        self.wandb_cfg = None
         logging.info(
             f"Initializing TrainPolicy: generation_id={generation_id}, island_id={island_id}, type(island_id)={type(island_id)}"
         )
 
-    def enable_u2o(self, pretrained_dir: str, u2o_cfg: dict = None, parent_checkpoint_path: str = None):
+    def enable_u2o(self, pretrained_dir: str, u2o_cfg: dict = None,
+                   parent_checkpoint_path: str = None, wandb_cfg: dict = None):
         """Enable U2O mode: SFAgent skill inference + fine-tune."""
         self.u2o_enabled = True
         self.pretrained_dir = pretrained_dir
         self.u2o_cfg = u2o_cfg or {}
         self.parent_checkpoint_path = parent_checkpoint_path
+        self.wandb_cfg = wandb_cfg
 
     def _load_train_cfg(self):
         logging.info("Loading train cfg")
@@ -231,6 +237,7 @@ class TrainPolicy:
                 pretrained_dir=self.pretrained_dir,
                 u2o_cfg=self.u2o_cfg,
                 parent_checkpoint_path=self.parent_checkpoint_path,
+                wandb_cfg=self.wandb_cfg,
             )
         else:
             # Original path: from-scratch training
