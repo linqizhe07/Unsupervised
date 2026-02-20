@@ -18,7 +18,7 @@ database:
   # sampling hyperparameters
   initial_temp: 1  # start with a higher temperature for uniform sampling (exploration)
   final_temp: 0.6  # exploitation
-  num_gpus: 4  # number of gpus to train policies on using parallel processing
+  num_gpus: 3  # number of gpus to train policies on using parallel processing
 
 evolution:
   num_generations: 7  # number of iterations T
