@@ -397,12 +397,12 @@ def run_training_u2o(
                 )
 
         # Periodic checkpoint
-        if step % 500 == 0:
-            ckpt_path = os.path.join(
-                model_checkpoint_file,
-                f"u2o_{generation_id}_{counter}_{step}.pt",
-            )
-            agent.save(ckpt_path)
+        #if step % 500 == 0:
+            #ckpt_path = os.path.join(
+                #model_checkpoint_file,
+                #f"u2o_{generation_id}_{counter}_{step}.pt",
+            #)
+            #agent.save(ckpt_path)
 
     # Save velocity log
     with open(velocity_file, "w") as f:
