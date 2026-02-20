@@ -118,7 +118,7 @@ def train(
 
     TIMESTEPS = 5000
     # total_timesteps = 3000000
-    total_timesteps = 500000
+    total_timesteps = 300000
 
     while current_timesteps < total_timesteps:
         model.learn(
