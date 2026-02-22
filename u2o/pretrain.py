@@ -340,10 +340,27 @@ def pretrain(
     hilp_discount: float = 0.98,
     hilp_expectile: float = 0.5,
     lr: float = 1e-4,
+    lr_coef: float = 5.0,
     batch_size: int = 1024,
     discount: float = 0.98,
     future: float = 0.99,
     p_randomgoal: float = 0.375,
+    sf_target_tau: float = 0.01,
+    mix_ratio: float = 0.5,
+    q_loss: bool = True,
+    feature_type: str = "state",
+    stddev_schedule: str = "0.2",
+    stddev_clip: float = 0.3,
+    use_rew_norm: bool = True,
+    boltzmann: bool = False,
+    temp: float = 1.0,
+    num_sf_updates: int = 1,
+    update_every_steps: int = 1,
+    update_z_every_step: int = 300,
+    update_cov_every_step: int = 1000,
+    num_expl_steps: int = 2000,
+    preprocess: bool = True,
+    add_trunk: bool = False,
     collection_episodes: int = 5000,
     pretrain_steps: int = 500000,
     max_episode_steps: int = 500,
@@ -387,18 +404,43 @@ def pretrain(
     config = {
         "obs_dim": obs_dim,
         "action_dim": action_dim,
+        # architecture
         "z_dim": z_dim,
         "hidden_dim": hidden_dim,
         "phi_hidden_dim": phi_hidden_dim,
         "feature_dim": feature_dim,
         "feature_learner": feature_learner,
+        "preprocess": preprocess,
+        "add_trunk": add_trunk,
+        # HILP
         "hilp_discount": hilp_discount,
         "hilp_expectile": hilp_expectile,
+        "feature_type": feature_type,
+        # optimizer
         "lr": lr,
+        "lr_coef": lr_coef,
+        # training loop
         "batch_size": batch_size,
+        "num_sf_updates": num_sf_updates,
+        "update_every_steps": update_every_steps,
+        "update_z_every_step": update_z_every_step,
+        "update_cov_every_step": update_cov_every_step,
+        "num_expl_steps": num_expl_steps,
+        # SF-specific
+        "sf_target_tau": sf_target_tau,
+        "mix_ratio": mix_ratio,
+        "q_loss": q_loss,
+        "use_rew_norm": use_rew_norm,
+        # actor
+        "stddev_schedule": stddev_schedule,
+        "stddev_clip": stddev_clip,
+        "boltzmann": boltzmann,
+        "temp": temp,
+        # replay buffer
         "discount": discount,
         "future": future,
         "p_randomgoal": p_randomgoal,
+        # collection
         "collection_episodes": collection_episodes,
         "pretrain_steps": pretrain_steps,
         "max_episode_steps": max_episode_steps,
@@ -477,20 +519,37 @@ def pretrain(
     # ============================================================
     print(f"\n--- Phase 2: Offline pretraining for {pretrain_steps} steps ---")
 
-    # Create SFAgent
+    # Create SFAgent with full config
     cfg = SFAgentConfig(
         obs_dim=obs_dim,
         action_dim=action_dim,
         device=device,
-        lr=lr,
+        z_dim=z_dim,
         hidden_dim=hidden_dim,
         phi_hidden_dim=phi_hidden_dim,
         feature_dim=feature_dim,
-        z_dim=z_dim,
-        batch_size=batch_size,
         feature_learner=feature_learner,
+        preprocess=preprocess,
+        add_trunk=add_trunk,
         hilp_discount=hilp_discount,
         hilp_expectile=hilp_expectile,
+        feature_type=feature_type,
+        lr=lr,
+        lr_coef=lr_coef,
+        batch_size=batch_size,
+        num_sf_updates=num_sf_updates,
+        update_every_steps=update_every_steps,
+        update_z_every_step=update_z_every_step,
+        update_cov_every_step=update_cov_every_step,
+        num_expl_steps=num_expl_steps,
+        sf_target_tau=sf_target_tau,
+        mix_ratio=mix_ratio,
+        q_loss=q_loss,
+        use_rew_norm=use_rew_norm,
+        stddev_schedule=stddev_schedule,
+        stddev_clip=stddev_clip,
+        boltzmann=boltzmann,
+        temp=temp,
     )
     agent = SFAgent(cfg)
 
@@ -565,18 +624,43 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="U2O Pretraining for Revolve")
     parser.add_argument("--output_dir", type=str, default="./u2o_pretrained")
+    # architecture
     parser.add_argument("--z_dim", type=int, default=50)
     parser.add_argument("--hidden_dim", type=int, default=1024)
     parser.add_argument("--phi_hidden_dim", type=int, default=512)
     parser.add_argument("--feature_dim", type=int, default=512)
     parser.add_argument("--feature_learner", type=str, default="hilp")
+    parser.add_argument("--preprocess", type=lambda x: x.lower() != "false", default=True)
+    parser.add_argument("--add_trunk", type=lambda x: x.lower() != "false", default=False)
+    # HILP
     parser.add_argument("--hilp_discount", type=float, default=0.98)
     parser.add_argument("--hilp_expectile", type=float, default=0.5)
+    parser.add_argument("--feature_type", type=str, default="state", choices=["state", "diff", "concat"])
+    # optimizer
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr_coef", type=float, default=5.0)
+    # training loop
     parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--num_sf_updates", type=int, default=1)
+    parser.add_argument("--update_every_steps", type=int, default=1)
+    parser.add_argument("--update_z_every_step", type=int, default=300)
+    parser.add_argument("--update_cov_every_step", type=int, default=1000)
+    parser.add_argument("--num_expl_steps", type=int, default=2000)
+    # SF-specific
+    parser.add_argument("--sf_target_tau", type=float, default=0.01)
+    parser.add_argument("--mix_ratio", type=float, default=0.5)
+    parser.add_argument("--q_loss", type=lambda x: x.lower() != "false", default=True)
+    parser.add_argument("--use_rew_norm", type=lambda x: x.lower() != "false", default=True)
+    # actor
+    parser.add_argument("--stddev_schedule", type=str, default="0.2")
+    parser.add_argument("--stddev_clip", type=float, default=0.3)
+    parser.add_argument("--boltzmann", type=lambda x: x.lower() != "false", default=False)
+    parser.add_argument("--temp", type=float, default=1.0)
+    # replay buffer
     parser.add_argument("--discount", type=float, default=0.98)
     parser.add_argument("--future", type=float, default=0.99)
     parser.add_argument("--p_randomgoal", type=float, default=0.375)
+    # collection
     parser.add_argument("--collection_episodes", type=int, default=5000)
     parser.add_argument("--max_buffer_episodes", type=int, default=5000)
     parser.add_argument("--pretrain_steps", type=int, default=500000)
@@ -598,10 +682,27 @@ if __name__ == "__main__":
         phi_hidden_dim=args.phi_hidden_dim,
         feature_dim=args.feature_dim,
         feature_learner=args.feature_learner,
+        preprocess=args.preprocess,
+        add_trunk=args.add_trunk,
         hilp_discount=args.hilp_discount,
         hilp_expectile=args.hilp_expectile,
+        feature_type=args.feature_type,
         lr=args.lr,
+        lr_coef=args.lr_coef,
         batch_size=args.batch_size,
+        num_sf_updates=args.num_sf_updates,
+        update_every_steps=args.update_every_steps,
+        update_z_every_step=args.update_z_every_step,
+        update_cov_every_step=args.update_cov_every_step,
+        num_expl_steps=args.num_expl_steps,
+        sf_target_tau=args.sf_target_tau,
+        mix_ratio=args.mix_ratio,
+        q_loss=args.q_loss,
+        use_rew_norm=args.use_rew_norm,
+        stddev_schedule=args.stddev_schedule,
+        stddev_clip=args.stddev_clip,
+        boltzmann=args.boltzmann,
+        temp=args.temp,
         discount=args.discount,
         future=args.future,
         p_randomgoal=args.p_randomgoal,

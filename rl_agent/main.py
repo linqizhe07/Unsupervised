@@ -116,7 +116,7 @@ def train(
             CustomSACPolicy, env, verbose=1, device=device, tensorboard_log=log_dir
         )
 
-    TIMESTEPS = 5000
+    TIMESTEPS = 50000
     # total_timesteps = 3000000
     total_timesteps = 300000
 
@@ -127,9 +127,7 @@ def train(
             callback=[velocity_callback, reward_callback],
         )
         current_timesteps += TIMESTEPS
-        model_save_path = os.path.join(
-            model_checkpoint_path, f"{sb3_algo}_{current_timesteps}.zip"
-        )
+
         model_save_path = os.path.join(
             model_checkpoint_path,
             f"{sb3_algo}_{generation_id}_{counter}_{current_timesteps}.zip",
@@ -250,20 +248,47 @@ def run_training_u2o(
     with open(config_path, "r") as f:
         pretrain_config = json.load(f)
 
-    # Recreate SFAgent with same architecture
+    # Recreate SFAgent: pretrain_config is the base, u2o_cfg overrides specific keys
+    def _pc(key, default):
+        """Read from u2o_cfg first (runtime override), then pretrain_config, then default."""
+        return u2o_cfg.get(key, pretrain_config.get(key, default))
+
     cfg = SFAgentConfig(
         obs_dim=pretrain_config["obs_dim"],
         action_dim=pretrain_config["action_dim"],
         device=str(device),
-        lr=u2o_cfg.get("lr", pretrain_config.get("lr", 1e-4)),
+        # architecture — must match pretrain exactly
+        z_dim=pretrain_config["z_dim"],
         hidden_dim=pretrain_config["hidden_dim"],
         phi_hidden_dim=pretrain_config["phi_hidden_dim"],
         feature_dim=pretrain_config["feature_dim"],
-        z_dim=pretrain_config["z_dim"],
-        batch_size=u2o_cfg.get("batch_size", pretrain_config.get("batch_size", 1024)),
         feature_learner=pretrain_config["feature_learner"],
+        preprocess=pretrain_config.get("preprocess", True),
+        add_trunk=pretrain_config.get("add_trunk", False),
+        # HILP
         hilp_discount=pretrain_config.get("hilp_discount", 0.98),
         hilp_expectile=pretrain_config.get("hilp_expectile", 0.5),
+        feature_type=pretrain_config.get("feature_type", "state"),
+        # optimizer
+        lr=_pc("lr", 1e-4),
+        lr_coef=pretrain_config.get("lr_coef", 5.0),
+        # training loop — can be overridden at finetune time
+        batch_size=_pc("batch_size", 1024),
+        num_sf_updates=_pc("num_sf_updates", 1),
+        update_every_steps=_pc("update_every_steps", 1),
+        update_z_every_step=_pc("update_z_every_step", 300),
+        update_cov_every_step=_pc("update_cov_every_step", 1000),
+        num_expl_steps=_pc("num_expl_steps", 2000),
+        # SF-specific
+        sf_target_tau=_pc("sf_target_tau", 0.01),
+        mix_ratio=_pc("mix_ratio", 0.5),
+        q_loss=pretrain_config.get("q_loss", True),
+        use_rew_norm=pretrain_config.get("use_rew_norm", True),
+        # actor
+        stddev_schedule=pretrain_config.get("stddev_schedule", "0.2"),
+        stddev_clip=pretrain_config.get("stddev_clip", 0.3),
+        boltzmann=pretrain_config.get("boltzmann", False),
+        temp=pretrain_config.get("temp", 1.0),
     )
     agent = SFAgent(cfg)
 
@@ -332,7 +357,7 @@ def run_training_u2o(
     env = EpisodeMonitor(gymenv)
 
     # Online replay buffer for fine-tuning
-    finetune_steps = u2o_cfg.get("finetune_steps", 1000)
+    finetune_steps = u2o_cfg.get("finetune_steps", 300000)
     online_buffer = ReplayBuffer(
         max_episodes=1000,
         discount=pretrain_config.get("discount", 0.98),
@@ -395,14 +420,6 @@ def run_training_u2o(
                     {f"finetune/{k}": v for k, v in metrics.items()},
                     step=step,
                 )
-
-        # Periodic checkpoint
-        #if step % 500 == 0:
-            #ckpt_path = os.path.join(
-                #model_checkpoint_file,
-                #f"u2o_{generation_id}_{counter}_{step}.pt",
-            #)
-            #agent.save(ckpt_path)
 
     # Save velocity log
     with open(velocity_file, "w") as f:

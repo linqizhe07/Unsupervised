@@ -55,15 +55,15 @@ export ROOT_PATH='Revolve'
 python -m u2o.pretrain \
         --output_dir ./u2o_pretrained \
         --z_dim 50 \
-        --hidden_dim 2048 \
-        --phi_hidden_dim 1024 \
-        --feature_dim 1024 \
+        --hidden_dim 1024 \
+        --phi_hidden_dim 512 \
+        --feature_dim 512 \
         --feature_learner hilp \
-        --collection_episodes 2000 \
-        --pretrain_steps 500000 \
-        --batch_size 2048 \
+        --collection_episodes 10000 \
+        --pretrain_steps 1000000 \
+        --batch_size 1024 \
         --exploration rnd \
-        --wandb_project revolve-u2o-2
+        --wandb_project revolve-u2o-4
 ```
 
 | Output File | Description |
@@ -81,10 +81,10 @@ python main.py \
         u2o.enabled=true \
         u2o.pretrained_dir=./u2o_pretrained \
         evolution.num_generations=5 \
-        evolution.individuals_per_generation=9 \
+        evolution.individuals_per_generation=15 \
         database.num_islands=3 \
         database.max_island_size=8 \
-        data_paths.run=10 \
+        data_paths.run=20 \
         environment.name="HumanoidEnv"
 ```
 

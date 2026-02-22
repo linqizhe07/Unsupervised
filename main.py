@@ -108,14 +108,18 @@ def main(cfg):
     if u2o_enabled:
         u2o_pretrained_dir = cfg.u2o.pretrained_dir
         u2o_cfg = {
-            "z_dim": cfg.u2o.get("z_dim", 50),
-            "hidden_dim": cfg.u2o.get("hidden_dim", 1024),
-            "phi_hidden_dim": cfg.u2o.get("phi_hidden_dim", 512),
-            "feature_dim": cfg.u2o.get("feature_dim", 512),
-            "feature_learner": cfg.u2o.get("feature_learner", "hilp"),
+            # finetune_steps is a runtime param (not in SFAgentConfig), pass directly
+            "finetune_steps": cfg.u2o.get("finetune_steps", 300000),
+            # training loop overrides (take priority over pretrain_config values)
             "lr": cfg.u2o.get("lr", 1e-4),
             "batch_size": cfg.u2o.get("batch_size", 1024),
-            "finetune_steps": cfg.u2o.get("finetune_steps", 1000),
+            "num_sf_updates": cfg.u2o.get("num_sf_updates", 1),
+            "update_every_steps": cfg.u2o.get("update_every_steps", 1),
+            "update_z_every_step": cfg.u2o.get("update_z_every_step", 300),
+            "update_cov_every_step": cfg.u2o.get("update_cov_every_step", 1000),
+            "num_expl_steps": cfg.u2o.get("num_expl_steps", 0),
+            "sf_target_tau": cfg.u2o.get("sf_target_tau", 0.01),
+            "mix_ratio": cfg.u2o.get("mix_ratio", 0.5),
         }
         print(f"U2O mode enabled. Pretrained dir: {u2o_pretrained_dir}")
 

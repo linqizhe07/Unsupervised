@@ -46,21 +46,39 @@ wandb:
 u2o:
   enabled: false  # set to true to use U2O pretraining
   pretrained_dir: ${root_dir}/u2o_pretrained
-  # SFAgent config (scaled for Humanoid 376-dim obs)
-  z_dim: 100             # skill vector dimension
-  hidden_dim: 2048       # network hidden size
-  phi_hidden_dim: 1024   # feature network hidden size
-  feature_dim: 1024      # feature output dimension
+  # --- Architecture (must match pretrain) ---
+  z_dim: 50              # skill vector dimension (reference: 50)
+  hidden_dim: 1024       # network hidden size (reference: 1024)
+  phi_hidden_dim: 512    # feature network hidden size (reference: 512)
+  feature_dim: 512       # feature output dimension (reference: 512)
   feature_learner: hilp  # feature learning method (hilp, lap, contrastive, icm, etc.)
+  feature_type: state    # phi input type: state | diff | concat
+  # --- HILP ---
   hilp_discount: 0.98    # HILP temporal discount
-  hilp_expectile: 0.5    # expectile for value learning
-  # Training
+  hilp_expectile: 0.5    # expectile for value learning (conservative: 0.7-0.9)
+  # --- Optimizer ---
   lr: 1e-4               # learning rate
-  batch_size: 2048       # batch size
-  finetune_steps: 50000  # fine-tuning steps per reward function
-  discount: 0.98         # MDP discount
+  lr_coef: 5.0           # phi optimizer lr multiplier (phi_lr = lr_coef * lr)
+  # --- Training loop (finetune overrides) ---
+  batch_size: 1024       # batch size
+  finetune_steps: 300000 # fine-tuning steps per reward function (reference: 1M, SAC baseline: 300K)
+  num_sf_updates: 1      # gradient updates per env step
+  update_every_steps: 1  # update frequency
+  update_z_every_step: 300   # skill resampling frequency
+  update_cov_every_step: 1000  # covariance update frequency
+  num_expl_steps: 0      # random exploration steps at start (0 = skip, weights already pretrained)
+  # --- SF-specific ---
   sf_target_tau: 0.01    # soft update rate for target networks
-  # Replay buffer
-  future: 0.99           # future sampling discount
+  mix_ratio: 0.5         # fraction of batch using phi-derived skills
+  q_loss: true           # use Q-loss (true) vs feature-loss (false)
+  use_rew_norm: true     # normalize task rewards during fine-tuning
+  # --- Actor ---
+  stddev_schedule: "0.2" # action noise schedule
+  stddev_clip: 0.3       # action noise clip
+  boltzmann: false       # use entropy-regularized (Boltzmann) actor
+  temp: 1.0              # temperature for Boltzmann actor
+  # --- Replay buffer (pretrain values; loaded from pretrain_config at runtime) ---
+  discount: 0.98         # MDP discount
+  future: 0.99           # future sampling parameter
   p_randomgoal: 0.375    # random goal sampling probability
 
