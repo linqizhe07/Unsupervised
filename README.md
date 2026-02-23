@@ -142,16 +142,16 @@ u2o:
   enabled: false                    # toggle U2O on/off
   pretrained_dir: ${root_dir}/u2o_pretrained
   # SFAgent architecture (scaled for Humanoid 376-dim obs)
-  z_dim: 100                       # skill vector dimension
-  hidden_dim: 2048                 # network hidden size
-  phi_hidden_dim: 1024             # feature network hidden size
-  feature_dim: 1024                # feature output dimension
+  z_dim: 50                       # skill vector dimension
+  hidden_dim: 1024                 # network hidden size
+  phi_hidden_dim: 512             # feature network hidden size
+  feature_dim: 512                # feature output dimension
   feature_learner: hilp            # feature learning method
   hilp_discount: 0.98              # HILP temporal discount
   hilp_expectile: 0.5              # expectile for value learning
   # Training
   lr: 1e-4                         # learning rate
-  batch_size: 2048                 # batch size
+  batch_size: 1024                 # batch size
   finetune_steps: 50000            # fine-tuning steps per reward function
   discount: 0.98                   # MDP discount
   sf_target_tau: 0.01              # soft update rate for target networks
@@ -165,14 +165,14 @@ Pretrain script arguments:
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--output_dir` | `./u2o_pretrained` | Output directory |
-| `--z_dim` | `100` | Skill vector dimension |
-| `--hidden_dim` | `2048` | Network hidden size |
-| `--phi_hidden_dim` | `1024` | Feature network hidden size |
-| `--feature_dim` | `1024` | Feature output dimension |
+| `--z_dim` | `50` | Skill vector dimension |
+| `--hidden_dim` | `1024` | Network hidden size |
+| `--phi_hidden_dim` | `512` | Feature network hidden size |
+| `--feature_dim` | `512` | Feature output dimension |
 | `--feature_learner` | `hilp` | Feature learning method (hilp, laplacian, contrastive, icm, etc.) |
-| `--collection_episodes` | `2000` | Episodes of random data to collect |
-| `--pretrain_steps` | `500000` | Offline training steps |
-| `--batch_size` | `2048` | Batch size for training |
+| `--collection_episodes` | `5000` | Episodes of random data to collect |
+| `--pretrain_steps` | `1000000` | Offline training steps |
+| `--batch_size` | `1024` | Batch size for training |
 | `--lr` | `1e-4` | Learning rate |
 | `--discount` | `0.98` | MDP discount factor |
 | `--hilp_discount` | `0.98` | HILP temporal discount |
