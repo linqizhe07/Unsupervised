@@ -1,6 +1,5 @@
 # REvolve + U2O: Reward Evolution with Unsupervised-to-Online RL
 ******************************************************
-**Based on the official ICLR 2025 REvolve paper, extended with U2O (Unsupervised-to-Online RL) pretraining.**
 
 
 ## Overview
