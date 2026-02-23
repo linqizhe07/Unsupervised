@@ -58,7 +58,7 @@ python -m u2o.pretrain \
         --phi_hidden_dim 512 \
         --feature_dim 512 \
         --feature_learner hilp \
-        --collection_episodes 10000 \
+        --collection_episodes 5000 \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
