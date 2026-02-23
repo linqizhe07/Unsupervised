@@ -58,7 +58,8 @@ python -m u2o.pretrain \
         --phi_hidden_dim 512 \
         --feature_dim 512 \
         --feature_learner hilp \
-        --collection_episodes 5000 \
+        --collection_episodes 10000 \
+        --max_buffer_episodes 10000 \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
@@ -169,7 +170,8 @@ Pretrain script arguments:
 | `--phi_hidden_dim` | `512` | Feature network hidden size |
 | `--feature_dim` | `512` | Feature output dimension |
 | `--feature_learner` | `hilp` | Feature learning method (hilp, laplacian, contrastive, icm, etc.) |
-| `--collection_episodes` | `5000` | Episodes of random data to collect |
+| `--collection_episodes` | `10000` | Episodes of random/RND data to collect |
+| `--max_buffer_episodes` | `10000` | Replay buffer capacity in episodes |
 | `--pretrain_steps` | `1000000` | Offline training steps |
 | `--batch_size` | `1024` | Batch size for training |
 | `--lr` | `1e-4` | Learning rate |

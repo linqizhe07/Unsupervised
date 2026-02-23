@@ -361,10 +361,10 @@ def pretrain(
     num_expl_steps: int = 2000,
     preprocess: bool = True,
     add_trunk: bool = False,
-    collection_episodes: int = 5000,
-    pretrain_steps: int = 500000,
+    collection_episodes: int = 10000,
+    pretrain_steps: int = 1000000,
     max_episode_steps: int = 500,
-    max_buffer_episodes: int = 5000,
+    max_buffer_episodes: int = 10000,
     eval_every: int = 500000,
     log_every: int = 1000,
     seed: int = 0,
@@ -661,9 +661,9 @@ if __name__ == "__main__":
     parser.add_argument("--future", type=float, default=0.99)
     parser.add_argument("--p_randomgoal", type=float, default=0.375)
     # collection
-    parser.add_argument("--collection_episodes", type=int, default=5000)
-    parser.add_argument("--max_buffer_episodes", type=int, default=5000)
-    parser.add_argument("--pretrain_steps", type=int, default=500000)
+    parser.add_argument("--collection_episodes", type=int, default=10000)
+    parser.add_argument("--max_buffer_episodes", type=int, default=10000)
+    parser.add_argument("--pretrain_steps", type=int, default=1000000)
     parser.add_argument("--max_episode_steps", type=int, default=500)
     parser.add_argument("--eval_every", type=int, default=500000)
     parser.add_argument("--log_every", type=int, default=1000)
