@@ -221,6 +221,10 @@ def run_training_u2o(
     from u2o.replay_buffer import ReplayBuffer
     from u2o.wrappers import EpisodeMonitor
     from utils import define_function_from_string
+    from rl_agent.reward_utils import (
+        build_env_state_from_transition,
+        call_reward_func_dynamically,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(log_dir, exist_ok=True)
@@ -320,26 +324,73 @@ def run_training_u2o(
     batch = offline_buffer.sample(sample_size)
     batch = batch.to(str(device))
 
-    # Compute task rewards on buffer transitions
-    from rl_agent.HumanoidEnv import call_reward_func_dynamically, build_env_state_from_obs
+    # Compute task rewards on sampled transitions using next_obs timing
+    # to match env.step reward semantics and original U2O behavior.
     task_rewards = []
     obs_np = batch.obs.cpu().numpy()
+    action_np = batch.action.cpu().numpy()
+    next_obs_np = batch.next_obs.cpu().numpy()
+    reward_failures = 0
     for i in range(obs_np.shape[0]):
         try:
-            env_state = build_env_state_from_obs(obs_np[i])
+            env_state = build_env_state_from_transition(
+                obs=obs_np[i],
+                action=action_np[i],
+                next_obs=next_obs_np[i],
+                reward_on="next",
+            )
             r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
             task_rewards.append(float(r))
         except Exception:
+            reward_failures += 1
             task_rewards.append(0.0)
+    if reward_failures > 0:
+        print(
+            f"[U2O] Warning: task reward eval failed on "
+            f"{reward_failures}/{len(task_rewards)} sampled transitions; filled with 0."
+        )
     task_reward_tensor = torch.tensor(
         task_rewards, device=device, dtype=torch.float32
     ).unsqueeze(-1)
 
+    # Match U2O init-meta logic for state features.
+    if agent.cfg.feature_type == "state":
+        meta_obs = batch.next_obs
+        meta_next_obs = batch.next_obs
+    else:
+        meta_obs = batch.obs
+        meta_next_obs = batch.next_obs
     meta = agent.infer_meta_from_obs_and_rewards(
-        batch.obs, task_reward_tensor, batch.next_obs
+        meta_obs, task_reward_tensor, meta_next_obs
     )
     z_star = meta["z"]
     print(f"[U2O] Inferred z* (norm={np.linalg.norm(z_star):.4f})")
+
+    # Relabel offline buffer rewards with task reward function
+    print(f"[U2O] Relabeling offline buffer ({offline_buffer.num_transitions} transitions) with task reward...")
+    relabel_failures = {"count": 0}
+
+    def _task_reward_fn(obs, action, next_obs):
+        try:
+            env_state = build_env_state_from_transition(
+                obs=obs,
+                action=action,
+                next_obs=next_obs,
+                reward_on="next",
+            )
+            r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
+            return float(r)
+        except Exception:
+            relabel_failures["count"] += 1
+            return 0.0
+
+    offline_buffer.relabel_rewards(_task_reward_fn)
+    if relabel_failures["count"] > 0:
+        print(
+            f"[U2O] Warning: relabel failed on {relabel_failures['count']} "
+            "transitions; corresponding rewards were set to 0."
+        )
+    print(f"[U2O] Offline buffer relabeled.")
 
     # Set solved meta for agent
     agent.solved_meta = meta
@@ -371,7 +422,7 @@ def run_training_u2o(
     episode_count = 0
     episode_step = 0
     velocity_log = []
-    log_every = 200
+    log_every = 400
 
     os.makedirs(os.path.dirname(velocity_file), exist_ok=True)
 

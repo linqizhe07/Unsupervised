@@ -240,15 +240,18 @@ class ReplayBuffer:
         """Recompute rewards using a new reward function.
 
         reward_fn: callable(obs, action, next_obs) -> float
+        The caller decides reward timing semantics (e.g. reward on next_obs).
         """
         n_eps = len(self)
         for ep_idx in range(n_eps):
             ep_len = self._episodes_length[ep_idx]
+            # Slice out the full episode arrays at once to avoid per-step indexing overhead.
+            obs_ep = self._storage["observation"][ep_idx, :ep_len]
+            action_ep = self._storage["action"][ep_idx, :ep_len]
+            next_obs_ep = self._storage["next_observation"][ep_idx, :ep_len]
+            rewards = np.empty((ep_len, 1), dtype=np.float32)
             for step_idx in range(ep_len):
-                obs = self._storage["observation"][ep_idx, step_idx]
-                action = self._storage["action"][ep_idx, step_idx]
-                next_obs = self._storage["next_observation"][ep_idx, step_idx]
-                reward = reward_fn(obs, action, next_obs)
-                self._storage["reward"][ep_idx, step_idx] = np.array(
-                    [reward], dtype=np.float32
+                rewards[step_idx, 0] = reward_fn(
+                    obs_ep[step_idx], action_ep[step_idx], next_obs_ep[step_idx]
                 )
+            self._storage["reward"][ep_idx, :ep_len] = rewards

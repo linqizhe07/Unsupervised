@@ -13,6 +13,10 @@ logging.basicConfig(filename="debug.log", level=logging.DEBUG)
 import json
 import os
 from rl_agent.environment import CustomEnvironment
+from rl_agent.reward_utils import (
+    build_env_state_from_transition,
+    call_reward_func_dynamically as _call_reward_func_dynamically,
+)
 import numpy as np
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -41,10 +45,7 @@ def define_function_from_string(
 
 
 def call_reward_func_dynamically(reward_func, env_state):
-    params = inspect.signature(reward_func).parameters
-    args_to_pass = {param: env_state[param] for param in params if param in env_state}
-    reward, reward_components = reward_func(**args_to_pass)
-    return reward, reward_components
+    return _call_reward_func_dynamically(reward_func, env_state)
 
 
 def build_env_state_from_obs(obs: np.ndarray) -> dict:
@@ -53,7 +54,12 @@ def build_env_state_from_obs(obs: np.ndarray) -> dict:
     This allows evaluating reward functions on stored observations
     (e.g. from the replay buffer during U2O skill inference).
     """
-    return {"observation": obs}
+    return build_env_state_from_transition(
+        obs=obs,
+        action=None,
+        next_obs=obs,
+        reward_on="next",
+    )
 
 
 DEFAULT_CAMERA_CONFIG = {

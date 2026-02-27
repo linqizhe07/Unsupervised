@@ -22,6 +22,9 @@ from gymnasium import spaces
 from gymnasium.envs.mujoco.mujoco_env import MujocoEnv
 from gymnasium.utils.ezpickle import EzPickle
 from rl_agent.environment import CustomEnvironment
+from rl_agent.reward_utils import (
+    call_reward_func_dynamically as _call_reward_func_dynamically,
+)
 
 from gymnasium_robotics.utils.mujoco_utils import MujocoModelNames
 
@@ -54,10 +57,7 @@ def define_function_from_string(
 
 
 def call_reward_func_dynamically(reward_func, env_state):
-    params = inspect.signature(reward_func).parameters
-    args_to_pass = {param: env_state[param] for param in params if param in env_state}
-    reward, reward_components = reward_func(**args_to_pass)
-    return reward, reward_components
+    return _call_reward_func_dynamically(reward_func, env_state)
 
 
 class AdroitHandDoorEnv(MujocoEnv, EzPickle):
