@@ -495,9 +495,9 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
             }
 
             episode_summary = {
-                "total_reward": sum(self.rewards),
+                "total_reward": float(sum(self.rewards)),
                 "episode_components": {
-                    key: sum(values)
+                    key: float(sum(values))
                     for key, values in self.reward_components_log.items()
                 },
             }

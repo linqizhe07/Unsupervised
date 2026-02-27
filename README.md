@@ -69,7 +69,7 @@ python -m u2o.pretrain \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
-        --wandb_project revolve-u2o-4
+        --wandb_project revolve-u2o-10
 ```
 
 | Output File | Description |
@@ -87,10 +87,10 @@ python main.py \
         u2o.enabled=true \
         u2o.pretrained_dir=./u2o_pretrained \
         evolution.num_generations=5 \
-        evolution.individuals_per_generation=15 \
+        evolution.individuals_per_generation=6 \
         database.num_islands=3 \
         database.max_island_size=8 \
-        data_paths.run=20 \
+        data_paths.run=30 \
         environment.name="HumanoidEnv"
 ```
 

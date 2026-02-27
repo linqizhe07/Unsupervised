@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import traceback
 from typing import Optional, Tuple, List, Callable
@@ -154,6 +155,15 @@ def main(cfg):
             logging.warning("wandb not installed; disabling wandb logging.")
             wandb_run = None
 
+    # Lineage table for tracking parent-child relationships
+    lineage_table = None
+    if wandb_run is not None:
+        import wandb as _wandb
+        lineage_table = _wandb.Table(
+            columns=["generation", "individual", "island_id", "fitness",
+                     "operator", "parent_ids", "best_parent_fitness"]
+        )
+
     system_prompt = prompts.types["system_prompt"]
     env_input_prompt = prompts.types["env_input_prompt"]
 
@@ -208,6 +218,8 @@ def main(cfg):
         counter_ids = []
         # metrics_dicts = []
         policies = []
+        operators = []       # "init" | "mutation" | "crossover" | ...
+        parent_infos = []    # list of (parent_id_str, best_parent_fitness)
 
         # for each generation, produce new individuals via mutation or crossover
         for counter_id in range(cfg.evolution.individuals_per_generation):
@@ -215,6 +227,7 @@ def main(cfg):
                 # TODO: to avoid corner cases, populate all islands uniformly
                 island_id = random.choice(range(rewards_database.num_islands))
                 in_context_samples = (None, None)
+                operator = "init"
                 operator_prompt = ""
                 parent_checkpoint_path = None
                 logging.info(
@@ -282,6 +295,21 @@ def main(cfg):
                 island_ids.append(island_id)
                 rew_fn_strings.append(reward_func_str)
                 counter_ids.append(counter_id)
+                operators.append(operator)
+                # Extract parent IDs from in_context_samples for lineage tracking
+                if generation_id == 0 or in_context_samples[0] is None:
+                    parent_infos.append(("N/A", float("nan")))
+                else:
+                    _pids, _pfits = [], []
+                    for _fn_path, _fit in in_context_samples:
+                        _m = re.search(r"/generated_fns/(\d+)_(\d+)\.txt$", _fn_path)
+                        if _m:
+                            _pids.append(f"{_m.group(1)}_{_m.group(2)}")
+                            _pfits.append(float(_fit))
+                    parent_infos.append((
+                        ", ".join(_pids) if _pids else "N/A",
+                        max(_pfits) if _pfits else float("nan"),
+                    ))
             except Exception as e:
                 logging.info(f"Error initializing TrainPolicy: {e}")
                 logging.error("Traceback:")
@@ -375,7 +403,30 @@ def main(cfg):
                     log_dict[f"island_{iid}/avg_fitness"] = float(island.average_fitness_score)
                     log_dict[f"island_{iid}/size"] = island.size
 
+            # per-individual fitness scores for this generation
+            for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
+                log_dict[f"individuals/g{generation_id}_c{cid}_island{iid}_fitness"] = float(fit)
+
             wandb_run.log(log_dict, step=generation_id)
+
+            # update lineage table
+            if lineage_table is not None:
+                for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
+                    pid_str, p_fit = parent_infos[i] if i < len(parent_infos) else ("N/A", float("nan"))
+                    lineage_table.add_data(
+                        generation_id,
+                        f"{generation_id}_{cid}",
+                        iid,
+                        float(fit),
+                        operators[i] if i < len(operators) else "unknown",
+                        pid_str,
+                        p_fit if not (p_fit != p_fit) else None,  # NaN → None for wandb
+                    )
+                import wandb as _wandb2
+                wandb_run.log({"lineage": _wandb2.Table(
+                    columns=lineage_table.columns,
+                    data=lineage_table.data,
+                )}, step=generation_id)
 
     if wandb_run is not None:
         wandb_run.finish()
