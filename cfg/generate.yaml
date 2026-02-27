@@ -39,7 +39,7 @@ environment:
 
 wandb:
   enabled: True
-  project: "revolve35"
+  project: "revolve40"
   entity: null
   run_name: null  # auto-generated if null
 
@@ -61,7 +61,7 @@ u2o:
   lr_coef: 5.0           # phi optimizer lr multiplier (phi_lr = lr_coef * lr)
   # --- Training loop (finetune overrides) ---
   batch_size: 1024       # batch size
-  finetune_steps: 50000 # fine-tuning steps per reward function (reference: 1M, SAC baseline: 300K)
+  finetune_steps: 500000 # fine-tuning steps per reward function (reference: 1M, SAC baseline: 300K)
   num_sf_updates: 1      # gradient updates per env step
   update_every_steps: 1  # update frequency
   update_z_every_step: 300   # skill resampling frequency
