@@ -1,4 +1,4 @@
-# Evolutionary Policy Learning via LLM-Guided Reward Evolution
+# Zero-Shot Revolve
 
 ## Overview
 
