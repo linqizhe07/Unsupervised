@@ -264,7 +264,11 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         self.filepath4 = os.path.join(self.base_path, self.filename4)
 
         self.current_step = 0  # Initialize step counter
-        xml_file_path = "/home/alkis/.local/lib/python3.8/site-packages/gymnasium_robotics/envs/assets/adroit_hand/adroit_door.xml"
+        import gymnasium_robotics
+        xml_file_path = os.path.join(
+            os.path.dirname(gymnasium_robotics.__file__),
+            "envs", "assets", "adroit_hand", "adroit_door.xml"
+        )
         self.mode = mode
         reward_func_str = open(reward_fn_path, "r").read()
         self.reward_func, _ = define_function_from_string(reward_func_str)
