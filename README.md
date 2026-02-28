@@ -11,22 +11,23 @@ The system combines three components into a unified pipeline:
 - **Policy inheritance**: each candidate fine-tunes from its parent's checkpoint rather than from scratch, conditioned on a task-inferred skill direction z* — so policy weights evolve across generations alongside the reward function
 
 ```
-[Pretrain (once)]                        [Evolution Loop (per candidate)]
+[Pretrain (once, per environment)]       [Evolution Loop (per candidate)]
 
-HumanoidEnv + random exploration         LLM generates/mutates reward function
-        |                                        |
-HILP feature learner φ(s)               Skill inference: z* = lstsq(φ, r)
-        |                                        |
-Successor features F(s,z,a)             Fine-tune from parent checkpoint
-        |                                        |
-Skill-conditioned actor π(a|s,z)         Evaluate fitness → update island
+Env (Humanoid / Adroit / ...) +          LLM generates/mutates reward function
+random or RND exploration                        |
+        |                                Skill inference: z* = lstsq(φ, r)
+HILP feature learner φ(s)                       |
+        |                                Fine-tune from parent checkpoint
+Successor features F(s,z,a)                     |
+        |                                Evaluate fitness → update island
+Skill-conditioned actor π(a|s,z)
         |
 agent_checkpoint.pt + replay_buffer.npz
 ```
 
 ## Setup
 ```shell
-git clone https://github.com/Linqizhe07/Unsupervised.git
+git clone https://github.com/Linqizhe07/zeroshotRevolve.git
 cd Unsupervised
 conda create -n "revolve" python=3.10
 conda activate revolve
@@ -35,32 +36,65 @@ pip install -e .
 
 ## Run
 
-### Baseline (no pretraining)
+### Supported Environments
 
+| `--env` / `environment.name` | obs_dim | action_dim | Description |
+|------------------------------|---------|------------|-------------|
+| `humanoid` / `HumanoidEnv` | 376 | 17 | MuJoCo Humanoid locomotion |
+| `adroit` / `AdroitHandDoorEnv` | 39 | 28 | 28-DOF dexterous hand, door opening task |
+
+> To add a new environment: (1) implement a `create_dummy_<env>_env()` factory in `u2o/pretrain.py`, (2) register it in `ENV_REGISTRY`, (3) add the env class to `utils.py` load_environment.
+
+---
+
+### Experiment 1: Baseline (no pretraining)
+
+**Humanoid:**
 ```shell
-export ROOT_PATH='Revolve'
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
+        evolution.baseline=revolve_auto \
+        environment.name="HumanoidEnv" \
         evolution.num_generations=5 \
         evolution.individuals_per_generation=12 \
         database.num_islands=3 \
-        database.max_island_size=8 \
         database.num_gpus=0 \
-        data_paths.run=20 \
-        environment.name="HumanoidEnv" \
-        wandb.project=Baseline
+        data_paths.run=1 \
+        u2o.enabled=false \
+        wandb.project=humanoid-baseline
 ```
 
-### Full System (with pretraining)
+**Adroit Hand:**
+```shell
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export OPENAI_API_KEY='<your openai key>'
+python main.py \
+        evolution.baseline=revolve_auto \
+        environment.name="AdroitHandDoorEnv" \
+        evolution.num_generations=5 \
+        evolution.individuals_per_generation=12 \
+        database.num_islands=3 \
+        database.num_gpus=0 \
+        data_paths.run=1 \
+        u2o.enabled=false \
+        wandb.project=adroit-baseline
+```
 
-#### Step 1: Pretrain (one-time)
+---
+
+### Experiment 2: Full System (with U2O pretraining)
+
+#### Step 1: Pretrain (one-time, per environment)
 
 Collect exploration data and train the skill-conditioned policy offline. The agent learns temporal-distance features φ(s) and skill-conditioned successor features F(s,z,a) without any task reward.
 
+**Humanoid:**
 ```shell
-export ROOT_PATH='/home/ubuntu/Unsupervised'
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
 python -m u2o.pretrain \
-        --output_dir ./u2o_pretrained \
+        --env humanoid \
+        --output_dir ./u2o_pretrained_humanoid \
         --z_dim 50 \
         --hidden_dim 1024 \
         --phi_hidden_dim 512 \
@@ -71,31 +105,66 @@ python -m u2o.pretrain \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
-        --wandb_project revolve-u2o-42
+        --wandb_project revolve-u2o-humanoid
+```
+
+**Adroit Hand:**
+```shell
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+python -m u2o.pretrain \
+        --env adroit \
+        --output_dir ./u2o_pretrained_adroit \
+        --z_dim 50 \
+        --hidden_dim 1024 \
+        --phi_hidden_dim 512 \
+        --feature_dim 512 \
+        --feature_learner hilp \
+        --collection_episodes 10000 \
+        --max_buffer_episodes 10000 \
+        --pretrain_steps 1000000 \
+        --batch_size 1024 \
+        --exploration rnd \
+        --wandb_project revolve-u2o-adroit
 ```
 
 | Output File | Description |
 |-------------|-------------|
 | `agent_checkpoint.pt` | Pretrained policy (actor + successor features + HILP feature learner) |
 | `replay_buffer.npz` | Collected exploration transitions for offline data mixing |
-| `pretrain_config.json` | Full config for reproducibility (obs_dim, action_dim, hyperparams) |
+| `pretrain_config.json` | Full config for reproducibility (env, obs_dim, action_dim, hyperparams) |
 
 #### Step 2: Run Evolution
 
+**Humanoid + U2O:**
 ```shell
-export ROOT_PATH='/home/ubuntu/Unsupervised'
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
         u2o.enabled=true \
-        u2o.pretrained_dir=./u2o_pretrained \
+        u2o.pretrained_dir=./u2o_pretrained_humanoid \
+        environment.name="HumanoidEnv" \
         evolution.num_generations=5 \
         evolution.individuals_per_generation=12 \
         database.num_islands=3 \
-        database.max_island_size=8 \
         database.num_gpus=0 \
-        data_paths.run=30 \
-        environment.name="HumanoidEnv" \
-        wandb.project=U2O
+        data_paths.run=1 \
+        wandb.project=humanoid-u2o
+```
+
+**Adroit Hand + U2O:**
+```shell
+export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export OPENAI_API_KEY='<your openai key>'
+python main.py \
+        u2o.enabled=true \
+        u2o.pretrained_dir=./u2o_pretrained_adroit \
+        environment.name="AdroitHandDoorEnv" \
+        evolution.num_generations=5 \
+        evolution.individuals_per_generation=12 \
+        database.num_islands=3 \
+        database.num_gpus=0 \
+        data_paths.run=1 \
+        wandb.project=adroit-u2o
 ```
 
 Each candidate reward function in the evolutionary loop goes through:
@@ -173,6 +242,7 @@ Pretrain script arguments:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
+| `--env` | `humanoid` | Environment: `humanoid`, `adroit` (extensible via `ENV_REGISTRY`) |
 | `--output_dir` | `./u2o_pretrained` | Output directory |
 | `--z_dim` | `50` | Skill vector dimension |
 | `--hidden_dim` | `1024` | Network hidden size |
@@ -195,4 +265,4 @@ Pretrain script arguments:
 
 ## Acknowledgements
 
-This work builds on [REvolve](https://openreview.net/forum?id=cJPUpL8mOw) (Hazra et al., ICLR 2025) and [Unsupervised-to-Online RL](https://arxiv.org/abs/2408.14785) (Lee et al., 2024).
+Inspired by [REvolve](https://openreview.net/forum?id=cJPUpL8mOw) (Hazra et al., ICLR 2025) and [Unsupervised-to-Online RL](https://arxiv.org/abs/2408.14785) (Lee et al., 2024).

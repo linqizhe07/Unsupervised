@@ -60,6 +60,45 @@ def create_dummy_humanoid_env() -> HumanoidEnv:
     )
 
 
+def create_dummy_adroit_env():
+    """Create an AdroitHandDoorEnv with a dummy reward function for pretraining."""
+    from rl_agent.AdroitEnv import AdroitHandDoorEnv
+    tmp_dir = tempfile.mkdtemp()
+    reward_fn_path = os.path.join(tmp_dir, "dummy_reward.py")
+    with open(reward_fn_path, "w") as f:
+        f.write(DUMMY_REWARD_FUNC_STR)
+    return AdroitHandDoorEnv(
+        reward_fn_path=reward_fn_path,
+        counter=0,
+        iteration=0,
+        group_id="pretrain",
+        llm_model="pretrain",
+        baseline="pretrain",
+        max_episode_steps=400,
+        mode="train",
+    )
+
+
+# -----------------------------------------------------------------------
+# Environment registry
+# Add new environments here: name -> (obs_dim, action_dim, factory_fn)
+# -----------------------------------------------------------------------
+ENV_REGISTRY = {
+    "humanoid": (376, 17, create_dummy_humanoid_env),
+    "adroit":   (39,  28, create_dummy_adroit_env),
+    # "carla": (128, 2, create_dummy_carla_env),  # future: autonomous driving
+}
+
+
+def create_env(env_name: str):
+    """Return (env, obs_dim, action_dim) for the given environment name."""
+    if env_name not in ENV_REGISTRY:
+        choices = ", ".join(ENV_REGISTRY.keys())
+        raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
+    obs_dim, action_dim, factory_fn = ENV_REGISTRY[env_name]
+    return factory_fn(), obs_dim, action_dim
+
+
 def collect_random_data(
     env: HumanoidEnv,
     replay_buffer: ReplayBuffer,
@@ -332,6 +371,7 @@ def validate_pretrain_args(
 
 def pretrain(
     output_dir: str,
+    env_name: str = "humanoid",
     z_dim: int = 50,
     hidden_dim: int = 1024,
     phi_hidden_dim: int = 512,
@@ -397,11 +437,14 @@ def pretrain(
     os.makedirs(output_dir, exist_ok=True)
     utils.set_seed_everywhere(seed)
 
-    obs_dim = 376
-    action_dim = 17
+    if env_name not in ENV_REGISTRY:
+        choices = ", ".join(ENV_REGISTRY.keys())
+        raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
+    obs_dim, action_dim, _ = ENV_REGISTRY[env_name]
 
     # Build config dict for logging
     config = {
+        "env_name": env_name,
         "obs_dim": obs_dim,
         "action_dim": action_dim,
         # architecture
@@ -471,6 +514,7 @@ def pretrain(
         )
 
     print(f"=== U2O Pretraining ===")
+    print(f"  Env: {env_name} (obs_dim={obs_dim}, action_dim={action_dim})")
     print(f"  Device: {device}")
     print(f"  z_dim: {z_dim}, feature_learner: {feature_learner}")
     print(f"  Collection episodes: {collection_episodes}")
@@ -490,7 +534,7 @@ def pretrain(
     # ============================================================
     # Phase 1: Data Collection
     # ============================================================
-    env = create_dummy_humanoid_env()
+    env, _, _ = create_env(env_name)
     try:
         if exploration == "rnd":
             print(
@@ -624,6 +668,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="U2O Pretraining for Revolve")
     parser.add_argument("--output_dir", type=str, default="./u2o_pretrained")
+    parser.add_argument("--env", type=str, default="humanoid", choices=list(ENV_REGISTRY.keys()),
+                        help="Environment to pretrain on. Supported: " + ", ".join(ENV_REGISTRY.keys()))
     # architecture
     parser.add_argument("--z_dim", type=int, default=50)
     parser.add_argument("--hidden_dim", type=int, default=1024)
@@ -677,6 +723,7 @@ if __name__ == "__main__":
 
     pretrain(
         output_dir=args.output_dir,
+        env_name=args.env,
         z_dim=args.z_dim,
         hidden_dim=args.hidden_dim,
         phi_hidden_dim=args.phi_hidden_dim,
