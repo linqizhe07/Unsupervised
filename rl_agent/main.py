@@ -117,8 +117,7 @@ def train(
         )
 
     TIMESTEPS = 50000
-    # total_timesteps = 3000000
-    total_timesteps = 300000
+    total_timesteps = 500000
 
     while current_timesteps < total_timesteps:
         model.learn(
@@ -426,66 +425,67 @@ def run_training_u2o(
 
     os.makedirs(os.path.dirname(velocity_file), exist_ok=True)
 
-    for step in range(1, finetune_steps + 1):
-        action = agent.act(obs, meta, step, eval_mode=False)
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
+    try:
+        for step in range(1, finetune_steps + 1):
+            action = agent.act(obs, meta, step, eval_mode=False)
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
 
-        online_buffer.add_transition(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, done=done,
-            discount=0.0 if terminated else 1.0,
-        )
-
-        episode_reward += reward
-        episode_step += 1
-        if "x_velocity" in info:
-            velocity_log.append(info["x_velocity"])
-
-        if done:
-            episode_count += 1
-            if wb_run is not None:
-                wb_run.log({
-                    "finetune/episode_reward": episode_reward,
-                    "finetune/episode_length": episode_step,
-                    "finetune/episode_count": episode_count,
-                    "finetune/x_velocity": info.get("x_velocity", 0),
-                }, step=step)
-            obs, info = env.reset()
-            episode_reward = 0.0
-            episode_step = 0
-        else:
-            obs = next_obs
-
-        # Update agent with mixed online + offline data
-        if len(online_buffer) >= 2 and step % cfg.update_every_steps == 0:
-            metrics = agent.update_with_offline_data(
-                replay_loader=online_buffer,
-                step=step,
-                with_reward=True,
-                meta=meta,
-                replay_loader_offline=offline_buffer,
+            online_buffer.add_transition(
+                obs=obs, action=action, reward=reward,
+                next_obs=next_obs, done=done,
+                discount=0.0 if terminated else 1.0,
             )
-            if wb_run is not None and step % log_every == 0 and metrics:
-                wb_run.log(
-                    {f"finetune/{k}": v for k, v in metrics.items()},
+
+            episode_reward += reward
+            episode_step += 1
+            if "x_velocity" in info:
+                velocity_log.append(info["x_velocity"])
+
+            if done:
+                episode_count += 1
+                if wb_run is not None:
+                    wb_run.log({
+                        "finetune/episode_reward": episode_reward,
+                        "finetune/episode_length": episode_step,
+                        "finetune/episode_count": episode_count,
+                        "finetune/x_velocity": info.get("x_velocity", 0),
+                    }, step=step)
+                obs, info = env.reset()
+                episode_reward = 0.0
+                episode_step = 0
+            else:
+                obs = next_obs
+
+            # Update agent with mixed online + offline data
+            if len(online_buffer) >= 2 and step % cfg.update_every_steps == 0:
+                metrics = agent.update_with_offline_data(
+                    replay_loader=online_buffer,
                     step=step,
+                    with_reward=True,
+                    meta=meta,
+                    replay_loader_offline=offline_buffer,
                 )
+                if wb_run is not None and step % log_every == 0 and metrics:
+                    wb_run.log(
+                        {f"finetune/{k}": v for k, v in metrics.items()},
+                        step=step,
+                    )
 
-    # Save velocity log
-    with open(velocity_file, "w") as f:
-        for v in velocity_log:
-            f.write(f"{v}\n")
+        # Save velocity log
+        with open(velocity_file, "w") as f:
+            for v in velocity_log:
+                f.write(f"{v}\n")
 
-    # Save final checkpoint
-    final_path = os.path.join(
-        model_checkpoint_file,
-        f"u2o_final_{generation_id}_{counter}.pt",
-    )
-    agent.save(final_path)
-    print(
-        f"[U2O] Fine-tuning complete: {episode_count} episodes, {finetune_steps} steps"
-    )
-
-    if wb_run is not None:
-        wb_run.finish()
+        # Save final checkpoint
+        final_path = os.path.join(
+            model_checkpoint_file,
+            f"u2o_final_{generation_id}_{counter}.pt",
+        )
+        agent.save(final_path)
+        print(
+            f"[U2O] Fine-tuning complete: {episode_count} episodes, {finetune_steps} steps"
+        )
+    finally:
+        if wb_run is not None:
+            wb_run.finish()

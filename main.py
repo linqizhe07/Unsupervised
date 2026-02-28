@@ -325,8 +325,9 @@ def main(cfg):
         if len(policies) == 0:
             logging.info("No valid reward functions. Hence, no policy trains required.")
             continue
-        # train policies in parallel (limit concurrency to avoid OOM)
-        max_parallel = cfg.database.get("num_gpus", 1)
+        # train policies in parallel (num_gpus=0 means all at once)
+        num_gpus = cfg.database.get("num_gpus", 1)
+        max_parallel = len(policies) if num_gpus == 0 else num_gpus
         logging.info(f"Training {len(policies)} policies ({max_parallel} at a time).")
         ckpt_and_performance_paths = train_policies_in_parallel(policies, max_workers=max_parallel)
         logging.info("Policy training finished.")
@@ -407,7 +408,7 @@ def main(cfg):
             for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
                 log_dict[f"individuals/g{generation_id}_c{cid}_island{iid}_fitness"] = float(fit)
 
-            wandb_run.log(log_dict, step=generation_id)
+            wandb_run.log(log_dict, step=generation_id + 1)
 
             # update lineage table
             if lineage_table is not None:
@@ -426,7 +427,7 @@ def main(cfg):
                 wandb_run.log({"lineage": _wandb2.Table(
                     columns=lineage_table.columns,
                     data=lineage_table.data,
-                )}, step=generation_id)
+                )}, step=generation_id + 1)
 
     if wandb_run is not None:
         wandb_run.finish()

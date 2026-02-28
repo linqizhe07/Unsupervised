@@ -42,11 +42,13 @@ export ROOT_PATH='Revolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
         evolution.num_generations=5 \
-        evolution.individuals_per_generation=9 \
+        evolution.individuals_per_generation=12 \
         database.num_islands=3 \
         database.max_island_size=8 \
-        data_paths.run=10 \
-        environment.name="HumanoidEnv"
+        database.num_gpus=0 \
+        data_paths.run=20 \
+        environment.name="HumanoidEnv" \
+        wandb.project=Baseline
 ```
 
 ### Full System (with pretraining)
@@ -56,7 +58,7 @@ python main.py \
 Collect exploration data and train the skill-conditioned policy offline. The agent learns temporal-distance features φ(s) and skill-conditioned successor features F(s,z,a) without any task reward.
 
 ```shell
-export ROOT_PATH='Revolve'
+export ROOT_PATH='/home/ubuntu/Unsupervised'
 python -m u2o.pretrain \
         --output_dir ./u2o_pretrained \
         --z_dim 50 \
@@ -69,7 +71,7 @@ python -m u2o.pretrain \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
-        --wandb_project revolve-u2o-10
+        --wandb_project revolve-u2o-42
 ```
 
 | Output File | Description |
@@ -81,17 +83,19 @@ python -m u2o.pretrain \
 #### Step 2: Run Evolution
 
 ```shell
-export ROOT_PATH='Revolve'
+export ROOT_PATH='/home/ubuntu/Unsupervised'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
         u2o.enabled=true \
         u2o.pretrained_dir=./u2o_pretrained \
         evolution.num_generations=5 \
-        evolution.individuals_per_generation=6 \
+        evolution.individuals_per_generation=12 \
         database.num_islands=3 \
         database.max_island_size=8 \
+        database.num_gpus=0 \
         data_paths.run=30 \
-        environment.name="HumanoidEnv"
+        environment.name="HumanoidEnv" \
+        wandb.project=U2O
 ```
 
 Each candidate reward function in the evolutionary loop goes through:
@@ -157,7 +161,7 @@ u2o:
   # Training
   lr: 1e-4                          # learning rate
   batch_size: 1024                  # batch size
-  finetune_steps: 300000            # fine-tuning steps per reward function
+  finetune_steps: 500000            # fine-tuning steps per reward function
   discount: 0.98                    # MDP discount
   sf_target_tau: 0.01               # soft update rate for target networks
   # Replay buffer

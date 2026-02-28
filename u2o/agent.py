@@ -258,9 +258,14 @@ class SFAgent:
                     dim=-1,
                 )
         z = torch.linalg.lstsq(phi, reward).solution
-        z = math.sqrt(self.cfg.z_dim) * F.normalize(z, dim=0)
+        if not torch.isfinite(z).all():
+            logger.warning("lstsq returned non-finite z*; falling back to random skill.")
+            z = self.sample_z(1).squeeze().to(self.cfg.device)
+        else:
+            z = math.sqrt(self.cfg.z_dim) * F.normalize(z, dim=0)
+            z = z.squeeze()
         meta = OrderedDict()
-        meta["z"] = z.squeeze().cpu().numpy()
+        meta["z"] = z.cpu().numpy()
         return meta
 
     def act(self, obs: np.ndarray, meta: MetaDict, step: int, eval_mode: bool = False) -> np.ndarray:
