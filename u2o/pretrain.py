@@ -105,15 +105,15 @@ def create_env(env_name: str):
 # URLs sourced from the d4rl repository (hand_manipulation_suite/__init__.py).
 _D4RL_DATASET_INFO = {
     "door-human-v1":  {
-        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-v0_demos.hdf5",
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_v1/door-human-v1.hdf5",
         "max_episode_steps": 200,
     },
     "door-cloned-v1": {
-        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-cloned-v1.hdf5",
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_v1/door-cloned-v1.hdf5",
         "max_episode_steps": 200,
     },
     "door-expert-v1": {
-        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-expert-v1.hdf5",
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_v1/door-expert-v1.hdf5",
         "max_episode_steps": 200,
     },
 }
