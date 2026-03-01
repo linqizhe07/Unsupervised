@@ -72,13 +72,16 @@ class RewardFunctionGeneration:
         if not evolve:
             return in_context_samples_str
         for filename, fitness_score in in_context_samples:
-            in_context_samples_str += "\n\n```python\n"
-            in_context_samples_str += open(filename, "r").read()
-            in_context_samples_str += "\n```\n"
             reward_history_file = filename.replace(
                 "generated_fns", "reward_history"
             ).replace(".txt", ".json")
-            # reward_history = json.load(open(reward_history_file, "r"))
+            # Skip individuals whose training hasn't completed yet (race condition)
+            if not os.path.exists(reward_history_file):
+                continue
+
+            in_context_samples_str += "\n\n```python\n"
+            in_context_samples_str += open(filename, "r").read()
+            in_context_samples_str += "\n```\n"
 
             reward_history = []
             with open(reward_history_file, "r") as f:
