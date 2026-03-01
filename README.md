@@ -124,7 +124,7 @@ python -m u2o.pretrain \
         --pretrain_steps 1000000 \
         --batch_size 1024 \
         --exploration rnd \
-        --wandb_project revolve-u2o-adroit
+        --wandb_project u20pretrain-adroit
 ```
 
 | Output File | Description |
