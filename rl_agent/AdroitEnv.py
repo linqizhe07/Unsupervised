@@ -220,14 +220,16 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
 
     def __init__(
         self,
-        reward_fn_path: str,
-        counter: int,
-        iteration: int,
-        group_id: str,
-        llm_model: str,
-        baseline: str,
+        reward_fn_path: str = None,
+        counter: int = 0,
+        iteration: int = 0,
+        group_id: str = "0",
+        llm_model: str = "default",
+        baseline: str = "default",
         max_episode_steps: int = 400,
         mode: str = "train",
+        reward_func_str: str = None,
+        reward_history_file: str = None,
         **kwargs,
     ):
         # xml_file_path = path.join(
@@ -236,7 +238,6 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         # )
         # /home/alkis/.local/lib/python3.8/site-packages/gymnasium_robotics/envs/assets/adroit_hand/adroit_door.xml
         self.max_episode_steps = max_episode_steps
-        self.reward_fn_path = reward_fn_path
         self.counter = counter
         self.iteration = iteration
         self.group_id = group_id
@@ -244,24 +245,31 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         self.baseline = baseline
         self.custom_env = CustomEnvironment()
 
-        self.base_path = os.path.join(
-            os.environ["ROOT_PATH"],
-            f"{baseline}/{llm_model}/group_{group_id}/reward_history",
-        )
-        self.filename = f"{self.iteration}_{self.counter}.json"
-        self.filepath = os.path.join(
-            self.base_path, self.filename
-        )  # for reward components entries
-        os.makedirs(self.base_path, exist_ok=True)
-        self.filename2 = f"{self.iteration}_{self.counter}.txt"
-        self.filepath2 = os.path.join(
-            self.base_path, self.filename2
-        )  # for wring episode steps and True False for calcualting fitness after
-        self.filename3 = f"testing_{self.iteration}_{self.counter}.txt"
-        self.filepath3 = os.path.join(self.base_path, self.filename3)
+        # Support reward_func_str as alternative to reward_fn_path
+        if reward_func_str is not None:
+            import tempfile
+            tmp_dir = tempfile.mkdtemp()
+            reward_fn_path = os.path.join(tmp_dir, f"reward_{iteration}_{counter}.py")
+            with open(reward_fn_path, "w") as f:
+                f.write(reward_func_str)
+        self.reward_fn_path = reward_fn_path
 
-        self.filename4 = f"rewards_{self.iteration}_{self.counter}.txt"
-        self.filepath4 = os.path.join(self.base_path, self.filename4)
+        # Use explicit reward_history_file if provided, otherwise build from ROOT_PATH
+        if reward_history_file is not None:
+            os.makedirs(os.path.dirname(reward_history_file), exist_ok=True)
+            self.filepath = reward_history_file
+        else:
+            self.base_path = os.path.join(
+                os.environ["ROOT_PATH"],
+                f"{baseline}/{llm_model}/group_{group_id}/reward_history",
+            )
+            os.makedirs(self.base_path, exist_ok=True)
+            self.filepath = os.path.join(self.base_path, f"{iteration}_{counter}.json")
+        # Secondary logs use same base dir as reward_history_file
+        _base = os.path.dirname(self.filepath)
+        self.filepath2 = os.path.join(_base, f"{iteration}_{counter}.txt")
+        self.filepath3 = os.path.join(_base, f"testing_{iteration}_{counter}.txt")
+        self.filepath4 = os.path.join(_base, f"rewards_{iteration}_{counter}.txt")
 
         self.current_step = 0  # Initialize step counter
         import gymnasium_robotics
@@ -409,7 +417,7 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         if self.render_mode == "human":
             self.render()
 
-        return obs, reward, done, False, dict(success=goal_achieved)
+        return obs, reward, done, False, dict(success=goal_achieved, fitness_signal=float(goal_distance))
 
     def _get_obs(self):
         # qpos for hand

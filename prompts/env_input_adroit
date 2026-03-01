@@ -1,0 +1,44 @@
+class AdroitHandDoorEnv(MujocoEnv, EzPickle):
+    """
+    ## Description
+    28-DOF dexterous hand manipulation task. The agent controls a ShadowHand (24 DOF)
+    attached to a 4-DOF arm and must open a door by undoing the latch and swinging it open.
+    The door position is randomized each episode.
+
+    ## Action Space
+    Box(-1.0, 1.0, (28,), float32) — absolute joint positions for arm (4) + hand (24).
+
+    ## Observation Space
+    Box(-inf, inf, (39,), float64)
+
+    | Num    | Key in env_state      | Description                                              |
+    |--------|-----------------------|----------------------------------------------------------|
+    | 0-26   | hand_qpos (27,)       | Joint angles: arm (indices 0-3) + hand (indices 4-26)    |
+    | 27     | latch_pos             | Angular position of the door latch (rad)                 |
+    | 28     | door_hinge / door_pos | Door hinge angle (rad); task complete when >= 1.35 rad   |
+    | 29-31  | palm_pos (3,)         | Palm center position (x, y, z) in world frame            |
+    | 32-34  | handle_pos (3,)       | Door handle position (x, y, z) in world frame            |
+    | 35-37  | palm_handle_delta (3,)| palm_pos - handle_pos (signed distance vector)           |
+    | 38     | door_open             | +1.0 if door_hinge > 1.0 rad, else -1.0                  |
+
+    Additional env_state keys:
+    - joint_velocities (30,): joint velocity vector
+    - joint_forces (28,): actuator force vector
+
+    ## Task
+    Maximize door opening: undo the latch, then swing the door open as far as possible.
+    The door hinge angle ranges from 0 (closed) to ~1.57 rad (fully open).
+    The task is considered solved when door_hinge >= 1.35 rad.
+
+    ## Reward Function Signature
+    def compute_reward(door_hinge, palm_pos, handle_pos, palm_handle_delta, latch_pos, door_open, ...):
+        # Use named arguments matching env_state keys above
+        ...
+        return total_reward, {"component_name": component_value, ...}
+
+    ## Example Reward Components
+    - get_to_handle: reward for moving palm close to door handle
+    - open_door: reward for increasing door_hinge angle
+    - latch_reward: reward for reducing latch_pos (unlatching)
+    - door_open_bonus: sparse bonus when door_hinge exceeds threshold
+"""

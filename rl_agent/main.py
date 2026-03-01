@@ -67,11 +67,11 @@ class VelocityLoggerCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         info = self.locals.get("infos", [])
-        if len(info) > 0 and "x_velocity" in info[0]:
-            x_velocity = info[0]["x_velocity"]
-            # Save the velocity to a file with the specified name in the directory
-            with open(self.velocity_filepath, "a") as f:
-                f.write(f"{x_velocity}\n")
+        if len(info) > 0:
+            signal = info[0].get("x_velocity") if "x_velocity" in info[0] else info[0].get("fitness_signal")
+            if signal is not None:
+                with open(self.velocity_filepath, "a") as f:
+                    f.write(f"{signal}\n")
         return True
 
 
@@ -157,16 +157,28 @@ def run_training(
     velocity_file,
     output_path,
     log_dir,
+    env_name="HumanoidEnv",
 ):
-    gymenv = HumanoidEnv(
-        reward_func_str=reward_func,
-        counter=counter,
-        generation_id=generation_id,
-        island_id=island_id,
-        reward_history_file=reward_history_file,
-        model_checkpoint_file=model_checkpoint_file,
-        velocity_file=velocity_file,
-    )
+    if env_name == "AdroitHandDoorEnv":
+        from rl_agent.AdroitEnv import AdroitHandDoorEnv
+        gymenv = AdroitHandDoorEnv(
+            reward_func_str=reward_func,
+            counter=counter,
+            iteration=generation_id,
+            group_id=str(island_id),
+            reward_history_file=reward_history_file,
+            mode="train",
+        )
+    else:
+        gymenv = HumanoidEnv(
+            reward_func_str=reward_func,
+            counter=counter,
+            generation_id=generation_id,
+            island_id=island_id,
+            reward_history_file=reward_history_file,
+            model_checkpoint_file=model_checkpoint_file,
+            velocity_file=velocity_file,
+        )
     sb3_algo = "SAC"
 
     env = Monitor(gymenv)  # Ensure monitoring
@@ -205,6 +217,7 @@ def run_training_u2o(
     u2o_cfg,
     parent_checkpoint_path=None,
     wandb_cfg=None,
+    env_name="HumanoidEnv",
 ):
     """
     U2O version of run_training using SFAgent with successor features.
@@ -395,15 +408,26 @@ def run_training_u2o(
     agent.solved_meta = meta
 
     # Create environment for online fine-tuning
-    gymenv = HumanoidEnv(
-        reward_func_str=reward_func,
-        counter=counter,
-        generation_id=generation_id,
-        island_id=island_id,
-        reward_history_file=reward_history_file,
-        model_checkpoint_file=model_checkpoint_file,
-        velocity_file=velocity_file,
-    )
+    if env_name == "AdroitHandDoorEnv":
+        from rl_agent.AdroitEnv import AdroitHandDoorEnv
+        gymenv = AdroitHandDoorEnv(
+            reward_func_str=reward_func,
+            counter=counter,
+            iteration=generation_id,
+            group_id=str(island_id),
+            reward_history_file=reward_history_file,
+            mode="train",
+        )
+    else:
+        gymenv = HumanoidEnv(
+            reward_func_str=reward_func,
+            counter=counter,
+            generation_id=generation_id,
+            island_id=island_id,
+            reward_history_file=reward_history_file,
+            model_checkpoint_file=model_checkpoint_file,
+            velocity_file=velocity_file,
+        )
     env = EpisodeMonitor(gymenv)
 
     # Online replay buffer for fine-tuning
@@ -439,8 +463,9 @@ def run_training_u2o(
 
             episode_reward += reward
             episode_step += 1
-            if "x_velocity" in info:
-                velocity_log.append(info["x_velocity"])
+            signal = info.get("x_velocity") if "x_velocity" in info else info.get("fitness_signal")
+            if signal is not None:
+                velocity_log.append(signal)
 
             if done:
                 episode_count += 1

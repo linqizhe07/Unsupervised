@@ -138,6 +138,7 @@ class TrainPolicy:
             island_id: int,
             baseline: str,
             output_log: str,
+            env_name: str = "HumanoidEnv",
     ):
         self.train_cfg = None
         self._load_train_cfg()
@@ -148,6 +149,7 @@ class TrainPolicy:
         self.counter_id = counter_id
         self.baseline = baseline  # ['revolve', 'revolve_auto', 'eureka', 'eureka_auto']
         self.output_log = output_log
+        self.env_name = env_name
         # U2O parameters (optional, set via enable_u2o())
         self.u2o_enabled = False
         self.pretrained_dir = None
@@ -241,6 +243,7 @@ class TrainPolicy:
                 u2o_cfg=self.u2o_cfg,
                 parent_checkpoint_path=self.parent_checkpoint_path,
                 wandb_cfg=self.wandb_cfg,
+                env_name=self.env_name,
             )
         else:
             # Original path: from-scratch training
@@ -255,6 +258,7 @@ class TrainPolicy:
                 velocity_file_path,
                 self.output_log,
                 log_dir,
+                env_name=self.env_name,
             )
         return checkpoint_file, velocity_file_path
 
