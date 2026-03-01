@@ -381,9 +381,9 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         goal_achieved = True if goal_distance >= 1.35 else False
 
         episode_summary = {
-            "total_reward": sum(self.rewards),
+            "total_reward": float(sum(self.rewards)),
             "episode_components": {
-                key: sum(values) for key, values in self.reward_components_log.items()
+                key: float(sum(values)) for key, values in self.reward_components_log.items()
             },
         }
 
