@@ -101,6 +101,47 @@ def create_env(env_name: str):
     return factory_fn(), obs_dim, action_dim
 
 
+# D4RL door dataset registry — no mujoco_py or d4rl package required.
+# URLs sourced from the d4rl repository (hand_manipulation_suite/__init__.py).
+_D4RL_DATASET_INFO = {
+    "door-human-v1":  {
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-v0_demos.hdf5",
+        "max_episode_steps": 200,
+    },
+    "door-cloned-v1": {
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-cloned-v1.hdf5",
+        "max_episode_steps": 200,
+    },
+    "door-expert-v1": {
+        "url": "http://rail.eecs.berkeley.edu/datasets/offline_rl/hand_dapg_new/door-expert-v1.hdf5",
+        "max_episode_steps": 200,
+    },
+}
+
+
+def _get_d4rl_hdf5_path(dataset_name: str) -> str:
+    """Return local HDF5 path, downloading from RAIL if not cached."""
+    import urllib.request
+
+    cache_dir = os.path.expanduser("~/.d4rl/datasets")
+    os.makedirs(cache_dir, exist_ok=True)
+    h5_path = os.path.join(cache_dir, f"{dataset_name}.hdf5")
+
+    if not os.path.exists(h5_path):
+        if dataset_name not in _D4RL_DATASET_INFO:
+            raise ValueError(
+                f"Unknown dataset '{dataset_name}'. "
+                f"Known datasets: {list(_D4RL_DATASET_INFO.keys())}. "
+                f"To use a custom dataset, place the HDF5 file at {h5_path} manually."
+            )
+        url = _D4RL_DATASET_INFO[dataset_name]["url"]
+        print(f"[D4RL] Downloading {dataset_name} from {url} ...")
+        urllib.request.urlretrieve(url, h5_path)
+        print(f"[D4RL] Saved to {h5_path}")
+
+    return h5_path
+
+
 def load_d4rl_data(
     d4rl_dataset_name: str,
     replay_buffer: ReplayBuffer,
@@ -108,12 +149,10 @@ def load_d4rl_data(
     expected_obs_dim: int = None,
     expected_action_dim: int = None,
 ) -> int:
-    """Load a D4RL offline dataset into the replay buffer.
+    """Load a D4RL offline dataset into the replay buffer via h5py.
 
-    Splits flat transitions into episodes using raw D4RL
-    terminals/timeouts markers, then feeds them into
-    ReplayBuffer.add_transition() so the same HILP/SF
-    pretraining loop can run unchanged.
+    Does NOT require the d4rl or mujoco_py packages.
+    Downloads the HDF5 file on first use and caches it in ~/.d4rl/datasets/.
 
     Args:
         d4rl_dataset_name: D4RL dataset id, e.g. 'door-human-v1',
@@ -126,24 +165,20 @@ def load_d4rl_data(
     Returns:
         Total number of transitions loaded.
     """
-    try:
-        import gym
-        import d4rl
-    except ImportError as exc:
-        raise ImportError(
-            "d4rl is required for GCRL pretraining.\n"
-            "Install with: pip install git+https://github.com/Farama-Foundation/d4rl.git"
-        ) from exc
+    import h5py
 
-    env = gym.make(d4rl_dataset_name)
-    dataset = env.get_dataset()
-    max_episode_steps = getattr(env, "_max_episode_steps", None)
+    h5_path = _get_d4rl_hdf5_path(d4rl_dataset_name)
+    max_episode_steps = _D4RL_DATASET_INFO.get(d4rl_dataset_name, {}).get("max_episode_steps")
 
-    observations = dataset["observations"].astype(np.float32)
-    actions = dataset["actions"].astype(np.float32)
+    with h5py.File(h5_path, "r") as f:
+        observations = f["observations"][:].astype(np.float32)
+        actions = f["actions"][:].astype(np.float32)
+        rewards = f["rewards"][:].astype(np.float32)
+        terminals = f["terminals"][:].astype(bool)
+        next_obs_data = f["next_observations"][:].astype(np.float32) if "next_observations" in f else None
+        timeouts = f["timeouts"][:].astype(bool) if "timeouts" in f else None
+
     actions = np.clip(actions, -(1 - 1e-5), 1 - 1e-5)
-    rewards = dataset["rewards"].astype(np.float32)
-    terminals = dataset["terminals"].astype(bool)
 
     if expected_obs_dim is not None and observations.shape[-1] != expected_obs_dim:
         raise ValueError(
@@ -155,13 +190,6 @@ def load_d4rl_data(
             f"D4RL dataset '{d4rl_dataset_name}' has action_dim={actions.shape[-1]}, "
             f"but env expects action_dim={expected_action_dim}."
         )
-
-    next_obs_data = dataset.get("next_observations")
-    if next_obs_data is not None:
-        next_obs_data = next_obs_data.astype(np.float32)
-    timeouts = dataset.get("timeouts")
-    if timeouts is not None:
-        timeouts = timeouts.astype(bool)
 
     n = len(observations)
     total_steps = 0
@@ -203,8 +231,6 @@ def load_d4rl_data(
     if replay_buffer._current_episode:
         replay_buffer._store_episode()
         episode_count += 1
-
-    env.close()
 
     print(
         f"[D4RL] Loaded {d4rl_dataset_name}: "
@@ -648,18 +674,9 @@ def pretrain(
     # Create replay buffer
     replay_episode_length = max_episode_steps + 1
     if exploration == "d4rl" and d4rl_dataset is not None:
-        try:
-            import gym
-            import d4rl  # noqa: F401
-
-            probe_env = gym.make(d4rl_dataset)
-            dataset_horizon = getattr(probe_env, "_max_episode_steps", None)
-            probe_env.close()
-            if dataset_horizon is not None:
-                replay_episode_length = max(replay_episode_length, int(dataset_horizon) + 1)
-        except ImportError:
-            # load_d4rl_data will raise a clearer error shortly after.
-            pass
+        dataset_horizon = _D4RL_DATASET_INFO.get(d4rl_dataset, {}).get("max_episode_steps")
+        if dataset_horizon is not None:
+            replay_episode_length = max(replay_episode_length, int(dataset_horizon) + 1)
 
     replay_buffer = ReplayBuffer(
         max_episodes=max_buffer_episodes,

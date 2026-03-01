@@ -148,7 +148,6 @@ Available datasets:
 | `door-expert-v1` | ~200 | Expert policy rollouts |
 
 ```shell
-# Requires: pip install git+https://github.com/Farama-Foundation/d4rl.git
 export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 python -m u2o.pretrain \
     --env adroit_door \
@@ -163,7 +162,7 @@ python -m u2o.pretrain \
     --phi_hidden_dim 512 \
     --feature_dim 512 \
     --feature_learner hilp \
-    --wandb_project revolve-u2o-adroit
+    --wandb_project Pretrain-adroit
 ```
 
 ### Offline Training (Phase 2) — Both Environments
