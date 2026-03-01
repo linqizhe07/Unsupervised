@@ -319,6 +319,25 @@ class SFAgent:
                 dim=-1,
             )
 
+    def _get_transition_phi(self, obs: torch.Tensor, next_obs: torch.Tensor) -> torch.Tensor:
+        """Reference U2O target_phi for a transition (s_t, s_{t+1}).
+
+        Uses the EMA target network (target_phi1) when available (HILP), so the
+        SF bootstrap target doesn't chase a non-stationary online phi network.
+        """
+        # HILP exposes a slowly-updated target_phi1; use it for stability.
+        if self.cfg.feature_learner == "hilp" and hasattr(self.feature_learner, "target_phi1"):
+            phi_net = self.feature_learner.target_phi1
+        else:
+            phi_net = self.feature_learner.feature_net
+
+        if self.cfg.feature_type == "state":
+            return phi_net(next_obs)
+        elif self.cfg.feature_type == "diff":
+            return phi_net(next_obs) - phi_net(obs)
+        else:
+            return torch.cat([phi_net(obs), phi_net(next_obs)], dim=-1)
+
     def update_sf(
         self,
         obs: torch.Tensor,
@@ -337,7 +356,7 @@ class SFAgent:
             next_action = dist.sample(clip=self.cfg.stddev_clip)
 
             next_F1, next_F2 = self.successor_target_net(next_obs, z, next_action)
-            target_phi = self._get_phi(next_obs, obs).detach()
+            target_phi = self._get_transition_phi(obs, next_obs).detach()
 
             next_Q1 = torch.einsum("sd, sd -> s", next_F1, z)
             next_Q2 = torch.einsum("sd, sd -> s", next_F2, z)
@@ -418,7 +437,7 @@ class SFAgent:
             next_action = dist.sample(clip=self.cfg.stddev_clip)
 
             next_F1, next_F2 = self.successor_target_net(next_obs, z, next_action)
-            target_phi = self._get_phi(next_obs, obs).detach()
+            target_phi = self._get_transition_phi(obs, next_obs).detach()
 
             next_Q1 = torch.einsum("sd, sd -> s", next_F1, z)
             next_Q2 = torch.einsum("sd, sd -> s", next_F2, z)
@@ -516,11 +535,12 @@ class SFAgent:
             if self.cfg.mix_ratio > 0:
                 perm = torch.randperm(self.cfg.batch_size)
                 with torch.no_grad():
-                    phi = self._get_phi(next_obs[perm], obs[perm])
+                    phi = self._get_transition_phi(obs[perm], next_obs[perm])
 
-                # compute inverse of cov of phi
-                cov = torch.matmul(phi.T, phi) / phi.shape[0]
-                inv_cov = torch.linalg.pinv(cov)
+                # Recompute inv_cov periodically (controlled by update_cov_every_step)
+                if step % self.cfg.update_cov_every_step == 0:
+                    cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                    self.inv_cov = torch.linalg.pinv(cov)
 
                 mix_idxs: tp.Any = np.where(
                     np.random.uniform(size=self.cfg.batch_size) < self.cfg.mix_ratio
@@ -528,7 +548,7 @@ class SFAgent:
                 with torch.no_grad():
                     new_z = phi[mix_idxs]
 
-                new_z = torch.matmul(new_z, inv_cov)
+                new_z = torch.matmul(new_z, self.inv_cov)
                 new_z = math.sqrt(self.cfg.z_dim) * F.normalize(new_z, dim=1)
                 z[mix_idxs] = new_z
 
@@ -581,11 +601,14 @@ class SFAgent:
             discount = torch.cat([batch_online.discount, batch_offline.discount], dim=0)
             next_obs = torch.cat([batch_online.next_obs, batch_offline.next_obs], dim=0)
 
-            # Handle future_obs (offline may not have it)
+            # Handle future_obs for mixed buffers; fall back to next_obs for the side
+            # that does not carry explicit future goals.
             if batch_online.future_obs is not None and batch_offline.future_obs is not None:
                 future_obs = torch.cat([batch_online.future_obs, batch_offline.future_obs], dim=0)
             elif batch_online.future_obs is not None:
                 future_obs = torch.cat([batch_online.future_obs, batch_offline.next_obs], dim=0)
+            elif batch_offline.future_obs is not None:
+                future_obs = torch.cat([batch_online.next_obs, batch_offline.future_obs], dim=0)
             else:
                 future_obs = None
 
@@ -604,11 +627,11 @@ class SFAgent:
             if self.cfg.mix_ratio > 0:
                 perm = torch.randperm(self.cfg.batch_size)
                 with torch.no_grad():
-                    phi = self._get_phi(next_obs[perm], obs[perm])
+                    phi = self._get_transition_phi(obs[perm], next_obs[perm])
 
-                # compute inverse of cov of phi
-                cov = torch.matmul(phi.T, phi) / phi.shape[0]
-                inv_cov = torch.linalg.pinv(cov)
+                if step % self.cfg.update_cov_every_step == 0:
+                    cov = torch.matmul(phi.T, phi) / phi.shape[0]
+                    self.inv_cov = torch.linalg.pinv(cov)
 
                 mix_idxs = np.where(
                     np.random.uniform(size=self.cfg.batch_size) < self.cfg.mix_ratio
@@ -616,7 +639,7 @@ class SFAgent:
                 with torch.no_grad():
                     new_z = phi[mix_idxs]
 
-                new_z = torch.matmul(new_z, inv_cov)
+                new_z = torch.matmul(new_z, self.inv_cov)
                 new_z = math.sqrt(self.cfg.z_dim) * F.normalize(new_z, dim=1)
                 z[mix_idxs] = new_z
 

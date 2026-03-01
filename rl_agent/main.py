@@ -92,6 +92,10 @@ def train(
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     current_timesteps = 0
+    final_checkpoint_path = os.path.join(
+        model_checkpoint_path,
+        f"{generation_id}_{counter}.zip",
+    )
     velocity_callback = VelocityLoggerCallback(
         velocity_filepath=velocity_path,  # Directly use the full file path
         verbose=1,
@@ -127,11 +131,7 @@ def train(
         )
         current_timesteps += TIMESTEPS
 
-        model_save_path = os.path.join(
-            model_checkpoint_path,
-            f"{sb3_algo}_{generation_id}_{counter}_{current_timesteps}.zip",
-        )
-        model.save(model_save_path)
+        model.save(final_checkpoint_path)
         env.render()
 
 
@@ -298,13 +298,13 @@ def run_training_u2o(
         # SF-specific
         sf_target_tau=_pc("sf_target_tau", 0.01),
         mix_ratio=_pc("mix_ratio", 0.5),
-        q_loss=pretrain_config.get("q_loss", True),
-        use_rew_norm=pretrain_config.get("use_rew_norm", True),
+        q_loss=_pc("q_loss", True),
+        use_rew_norm=_pc("use_rew_norm", True),
         # actor
-        stddev_schedule=pretrain_config.get("stddev_schedule", "0.2"),
-        stddev_clip=pretrain_config.get("stddev_clip", 0.3),
-        boltzmann=pretrain_config.get("boltzmann", False),
-        temp=pretrain_config.get("temp", 1.0),
+        stddev_schedule=_pc("stddev_schedule", "0.2"),
+        stddev_clip=_pc("stddev_clip", 0.3),
+        boltzmann=_pc("boltzmann", False),
+        temp=_pc("temp", 1.0),
     )
     agent = SFAgent(cfg)
 
@@ -321,7 +321,10 @@ def run_training_u2o(
 
     # Load offline replay buffer
     offline_buffer = ReplayBuffer(
-        max_episodes=pretrain_config.get("collection_episodes", 5000),
+        max_episodes=pretrain_config.get(
+            "max_buffer_episodes",
+            pretrain_config.get("collection_episodes", 5000),
+        ),
         discount=pretrain_config.get("discount", 0.98),
         future=pretrain_config.get("future", 0.99),
         p_randomgoal=pretrain_config.get("p_randomgoal", 0.375),
@@ -436,7 +439,7 @@ def run_training_u2o(
         max_episodes=1000,
         discount=pretrain_config.get("discount", 0.98),
         future=1.0,
-        max_episode_length=1000,
+        max_episode_length=getattr(gymenv, "max_episode_steps", 1000) + 1,
     )
 
     # Fine-tuning loop

@@ -11,10 +11,10 @@ from rewards_database import RevolveDatabase, EurekaDatabase
 from modules import *
 import utils
 import prompts
-from evolutionary_utils.custom_environment import CustomEnvironment
 import absl.logging as logging
 from functools import partial
 from utils import *
+from rl_agent.reward_utils import build_env_state_from_transition
 import hydra
 import os
 
@@ -40,11 +40,38 @@ def load_reward_function(file_path: str) -> Callable:
     return reward_func
 
 
-def is_valid_reward_fn(generated_fn: Callable, generated_fn_str: str, args: List[str]):
+def _build_validation_env_state(env_name: str):
+    if env_name == "AdroitHandDoorEnv":
+        obs = np.zeros(39, dtype=np.float32)
+        action = np.zeros(28, dtype=np.float32)
+        joint_velocities = np.zeros(30, dtype=np.float32)
+        joint_forces = np.zeros(28, dtype=np.float32)
+    else:
+        obs = np.zeros(376, dtype=np.float32)
+        action = np.zeros(17, dtype=np.float32)
+        joint_velocities = None
+        joint_forces = None
+
+    return build_env_state_from_transition(
+        obs=obs,
+        action=action,
+        next_obs=obs,
+        reward_on="next",
+        joint_velocities=joint_velocities,
+        joint_forces=joint_forces,
+    )
+
+
+def is_valid_reward_fn(
+    generated_fn: Callable,
+    generated_fn_str: str,
+    args: List[str],
+    env_name: str,
+):
     """validate generated heuristic function"""
     if generated_fn is None or args is None:
         raise utils.InvalidFunctionError("Generated function has no arguments.")
-    env_state = CustomEnvironment().env_state
+    env_state = _build_validation_env_state(env_name)
     env_vars = env_state.keys()
     # check if all args are valid env args
     if set(args).intersection(set(env_vars)) != set(args):
@@ -62,6 +89,7 @@ def is_valid_reward_fn(generated_fn: Callable, generated_fn_str: str, args: List
 def generate_valid_reward(
         reward_generation: RewardFunctionGeneration,
         in_context_prompt: str,
+        env_name: str,
         max_trials: int = 10,
 ) -> Tuple[Optional[str], Optional[List[str]]]:
     """
@@ -80,7 +108,7 @@ def generate_valid_reward(
                 in_context_prompt + error_feedback
             )
             rew_func, args = utils.define_function_from_string(rew_func_str)
-            is_valid_reward_fn(rew_func, rew_func_str, args)
+            is_valid_reward_fn(rew_func, rew_func_str, args, env_name)
             logging.info("Valid reward function generated.")
             error_feedback = ""
             break  # Exit the loop if successful
@@ -261,7 +289,7 @@ def main(cfg):
             logging.info(f"Designing reward function for counter {counter_id}")
             # generate valid fn str
             reward_func_str, _ = generate_valid_reward(
-                reward_generation, in_context_prompt
+                reward_generation, in_context_prompt, env_name
             )
             if reward_func_str is None:
                 logging.info(

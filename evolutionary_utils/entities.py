@@ -64,7 +64,7 @@ class Individual:
         """model (policy) checkpoint path"""
         return (
             f"{self.reward_fn_dir}/island_{self.island_id}/model_checkpoints/"
-            f"{self.generation_id}_{self.counter_id}.h5"
+            f"{self.generation_id}_{self.counter_id}.zip"
         )
 
     @property
@@ -127,7 +127,7 @@ class Individual:
         delete_file(self.fn_file_path, "generated reward fn (.txt) file")
         delete_file(self.fitness_file_path, "fitness score (.txt) file")
         delete_file(self.reward_history_path, "reward history (.json) file")
-        delete_file(self.model_checkpoint_path, "model checkpoint (.h5) file")
+        delete_file(self.model_checkpoint_path, "model checkpoint (.zip) file")
 
 
 class Island:

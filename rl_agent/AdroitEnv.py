@@ -390,7 +390,9 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         with open(self.filepath4, "a") as file:
             file.write(f"Reward {reward}\n")
 
-        done = (goal_distance > 1.35) or (self.current_step >= 400)
+        terminated = goal_distance > 1.35
+        truncated = self.current_step >= self.max_episode_steps and not terminated
+        done = terminated or truncated
         if done and self.mode == "test":
             with open(self.filepath3, "a") as file:
                 file.write(
@@ -417,7 +419,10 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         if self.render_mode == "human":
             self.render()
 
-        return obs, reward, done, False, dict(success=goal_achieved, fitness_signal=float(goal_distance))
+        return obs, reward, terminated, truncated, dict(
+            success=goal_achieved,
+            fitness_signal=float(goal_distance),
+        )
 
     def _get_obs(self):
         # qpos for hand

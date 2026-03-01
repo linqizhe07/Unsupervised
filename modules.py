@@ -202,7 +202,7 @@ class TrainPolicy:
 
         checkpoint_file = os.path.join(
             self.output_log,
-            f"island_{self.island_id}/model_checkpoints/{self.generation_id}_{self.counter_id}.h5",
+            f"island_{self.island_id}/model_checkpoints/{self.generation_id}_{self.counter_id}.zip",
         )
 
         velocity_file_path = os.path.join(

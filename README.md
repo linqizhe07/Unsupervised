@@ -4,264 +4,345 @@
 
 This project addresses a fundamental inefficiency in LLM-guided reward design: each candidate reward function is evaluated by training a policy from scratch, making the search expensive and the fitness signal noisy. We introduce a system that evolves **both reward functions and policy networks** jointly across generations.
 
-The system combines three components into a unified pipeline:
+The system combines three components:
 
-- **LLM-based reward evolution**: an island-based evolutionary algorithm uses an LLM to generate, mutate, and crossover reward function code, maintaining a population of candidates across parallel islands
-- **Unsupervised pretraining**: a skill-conditioned policy is pretrained entirely without task supervision using successor features and HILP feature learning, building a reusable behavioral prior over the state space
-- **Policy inheritance**: each candidate fine-tunes from its parent's checkpoint rather than from scratch, conditioned on a task-inferred skill direction z* — so policy weights evolve across generations alongside the reward function
+- **LLM-based reward evolution**: an island-based evolutionary algorithm uses an LLM to generate, mutate, and crossover reward function code across parallel islands
+- **Unsupervised pretraining**: a skill-conditioned policy is pretrained without any task reward using HILP feature learning and successor features, building a reusable behavioral prior
+- **Policy inheritance**: each candidate fine-tunes from its parent's checkpoint conditioned on a task-inferred skill direction z*, so policy weights evolve across generations alongside the reward function
 
 ```
-[Pretrain (once, per environment)]       [Evolution Loop (per candidate)]
+[Pretrain — once per environment]        [Evolution loop — per reward candidate]
 
-Env (Humanoid / Adroit / ...) +          LLM generates/mutates reward function
-random or RND exploration                        |
-        |                                Skill inference: z* = lstsq(φ, r)
-HILP feature learner φ(s)                       |
-        |                                Fine-tune from parent checkpoint
-Successor features F(s,z,a)                     |
-        |                                Evaluate fitness → update island
-Skill-conditioned actor π(a|s,z)
-        |
-agent_checkpoint.pt + replay_buffer.npz
+  Humanoid: RND exploration  ──┐
+                               ├──→ ReplayBuffer
+  AdroitHand: D4RL dataset ───┘         │
+                                    HILP φ(s): temporal-distance features
+                                         │
+                                    SF F(s,z,a): skill-conditioned Q
+                                         │
+                                    Actor π(a|s,z)
+                                         │
+                               agent_checkpoint.pt
+                                         │
+                        ┌────────────────┘
+                        │
+              LLM generates reward fn
+                        │
+              z* = lstsq(φ, r)      ← skill inference, no retraining
+                        │
+              Fine-tune π from parent checkpoint
+                        │
+              Evaluate fitness → update island
 ```
 
-## Setup
+---
+
+## Installation
+
 ```shell
 git clone https://github.com/Linqizhe07/zeroshotRevolve.git
 cd Unsupervised
-conda create -n "revolve" python=3.10
+conda create -n revolve python=3.10
 conda activate revolve
 pip install -e .
 ```
 
-## Run
+### Required Packages
 
-### Supported Environments
+Core dependencies (installed by `pip install -e .`):
 
-| `--env` / `environment.name` | obs_dim | action_dim | Description |
-|------------------------------|---------|------------|-------------|
-| `humanoid` / `HumanoidEnv` | 376 | 17 | MuJoCo Humanoid locomotion |
-| `adroit` / `AdroitHandDoorEnv` | 39 | 28 | 28-DOF dexterous hand, door opening task |
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `torch` | ≥2.0 | SFAgent, HILP, actor networks |
+| `numpy` | — | Array operations |
+| `scipy` | — | Skill inference (`lstsq`) |
+| `mujoco` | 2.3.7 | Physics simulation |
+| `gymnasium[mujoco]` | 0.29.1 | Humanoid environment |
+| `gymnasium-robotics` | 1.2.4 | AdroitHand environment |
+| `stable-baselines3` | 2.3.2 | SAC training in evolution loop |
+| `hydra-core` | 1.3.2 | Config management |
+| `openai` | — | LLM reward generation |
+| `tensorboard` | 2.10.1 | Metrics logging |
+| `h5py` | 3.10.0 | Dataset I/O |
 
-> To add a new environment: (1) implement a `create_dummy_<env>_env()` factory in `u2o/pretrain.py`, (2) register it in `ENV_REGISTRY`, (3) add the env class to `utils.py` load_environment.
+Additional (install as needed):
+
+```shell
+# AdroitHand pretraining: D4RL offline datasets
+pip install git+https://github.com/Farama-Foundation/d4rl.git
+
+# Experiment tracking (optional)
+pip install wandb
+```
+
+> `d4rl` is not on PyPI and requires MuJoCo 2.x. Datasets are downloaded automatically on first use and cached in `~/.d4rl/`.
 
 ---
+
+## Supported Environments
+
+| `--env` | `environment.name` | obs_dim | action_dim | Description |
+|---------|-------------------|---------|------------|-------------|
+| `humanoid` | `HumanoidEnv` | 376 | 17 | MuJoCo Humanoid locomotion |
+| `adroit_door` | `AdroitHandDoorEnv` | 39 | 28 | 28-DOF dexterous hand, door opening |
+
+---
+
+## Pretraining
+
+Pretraining is **one-time per environment**. It has two phases:
+
+1. **Data collection** — environment-specific (see below)
+2. **Offline training** — identical for both environments: train SFAgent on the collected buffer using HILP feature learning and successor features, with no task reward
+
+### Humanoid — ZSRL Pipeline (RND exploration)
+
+The Humanoid environment has no offline dataset. The agent collects its own data using RND (Random Network Distillation): a predictor network is trained to match a fixed random target; states with high prediction error are novel and yield high intrinsic reward, driving the actor toward unexplored regions.
+
+```
+HumanoidEnv (obs=376, action=17)
+    │
+    ├── RND predictor/target networks (obs → 128-dim embedding)
+    ├── Lightweight REINFORCE actor trained on intrinsic reward
+    │
+    └──→ ReplayBuffer (reward stored as 0.0 — only trajectories matter)
+```
+
+```shell
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
+python -m u2o.pretrain \
+    --env humanoid \
+    --output_dir ./u2o_pretrained_humanoid \
+    --exploration rnd \
+    --collection_episodes 10000 \
+    --max_buffer_episodes 10000 \
+    --pretrain_steps 1000000 \
+    --batch_size 1024 \
+    --z_dim 50 \
+    --hidden_dim 1024 \
+    --phi_hidden_dim 512 \
+    --feature_dim 512 \
+    --feature_learner hilp \
+    --wandb_project revolve-u2o-humanoid
+```
+
+### AdroitHand — GCRL Pipeline (D4RL offline dataset)
+
+The AdroitHand environment has high-quality offline datasets from D4RL. The environment is **never instantiated** during pretraining — the dataset is loaded directly into the replay buffer.
+
+```
+D4RL dataset (door-human-v1 / door-cloned-v1 / door-expert-v1)
+    │
+    ├── Split by terminals/timeouts into episodes
+    ├── terminal → discount=0.0 | timeout → discount=1.0
+    │
+    └──→ ReplayBuffer (obs=39, action=28)
+```
+
+Available datasets:
+
+| `--d4rl_dataset` | Episodes | Notes |
+|------------------|----------|-------|
+| `door-human-v1` | ~25 | MOCO-captured human demos — highest quality |
+| `door-cloned-v1` | ~5000 | BC rollouts from human demos — most data |
+| `door-expert-v1` | ~200 | Expert policy rollouts |
+
+```shell
+# Requires: pip install git+https://github.com/Farama-Foundation/d4rl.git
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
+python -m u2o.pretrain \
+    --env adroit_door \
+    --output_dir ./u2o_pretrained_adroit \
+    --exploration d4rl \
+    --d4rl_dataset door-cloned-v1 \
+    --max_buffer_episodes 5000 \
+    --pretrain_steps 1000000 \
+    --batch_size 1024 \
+    --z_dim 50 \
+    --hidden_dim 1024 \
+    --phi_hidden_dim 512 \
+    --feature_dim 512 \
+    --feature_learner hilp \
+    --wandb_project revolve-u2o-adroit
+```
+
+### Offline Training (Phase 2) — Both Environments
+
+Each training step:
+
+1. Sample a batch of `(s, a, r, s', s_future)` from the replay buffer — `s_future` is geometrically sampled within the same episode (`future=0.99`)
+2. Normalize observations with a running mean/std tracker (Welford)
+3. Sample skill vectors `z` uniformly from the unit sphere; replace 50% with whitened phi embeddings (`mix_ratio=0.5`) to encourage SF learning on meaningful directions
+4. **HILP loss**: train dual φ networks to approximate temporal distance `V(s, g) ≈ −d(s→g)` using expectile regression; EMA-update target φ networks (`τ=0.005`)
+5. **SF loss**: train dual F networks so `F(s,z,a)ᵀz ≈ Q(s,a)`; bootstrap target uses EMA target φ and EMA successor net (`τ=0.01`)
+6. **Actor loss**: maximize `Q = F(s,z,π(s,z))ᵀz`
+
+Outputs:
+
+| File | Description |
+|------|-------------|
+| `agent_checkpoint.pt` | Pretrained SFAgent (actor + SF networks + HILP φ) |
+| `replay_buffer.npz` | Collected/loaded transitions for offline mixing during fine-tuning |
+| `pretrain_config.json` | Full hyperparameter record |
+
+---
+
+## Evolution Loop
 
 ### Experiment 1: Baseline (no pretraining)
 
 **Humanoid:**
 ```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
-        evolution.baseline=revolve_auto \
-        environment.name="HumanoidEnv" \
-        evolution.num_generations=5 \
-        evolution.individuals_per_generation=12 \
-        database.num_islands=3 \
-        database.num_gpus=0 \
-        data_paths.run=1 \
-        u2o.enabled=false \
-        wandb.project=humanoid-baseline
+    evolution.baseline=revolve_auto \
+    environment.name="HumanoidEnv" \
+    evolution.num_generations=5 \
+    evolution.individuals_per_generation=12 \
+    database.num_islands=3 \
+    database.num_gpus=0 \
+    data_paths.run=700 \
+    u2o.enabled=false \
+    wandb.project=humanoid-baseline
 ```
 
-**Adroit Hand:**
+**AdroitHand:**
 ```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
-        evolution.baseline=revolve_auto \
-        environment.name="AdroitHandDoorEnv" \
-        evolution.num_generations=5 \
-        evolution.individuals_per_generation=12 \
-        database.num_islands=3 \
-        database.num_gpus=0 \
-        data_paths.run=1 \
-        u2o.enabled=false \
-        wandb.project=adroit-baseline
+    evolution.baseline=revolve_auto \
+    environment.name="AdroitHandDoorEnv" \
+    evolution.num_generations=5 \
+    evolution.individuals_per_generation=12 \
+    database.num_islands=3 \
+    database.num_gpus=0 \
+    data_paths.run=1 \
+    u2o.enabled=false \
+    wandb.project=adroit-baseline
 ```
-
----
 
 ### Experiment 2: Full System (with U2O pretraining)
 
-#### Step 1: Pretrain (one-time, per environment)
-
-Collect exploration data and train the skill-conditioned policy offline. The agent learns temporal-distance features φ(s) and skill-conditioned successor features F(s,z,a) without any task reward.
-
-**Humanoid:**
-```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
-python -m u2o.pretrain \
-        --env humanoid \
-        --output_dir ./u2o_pretrained_humanoid \
-        --z_dim 50 \
-        --hidden_dim 1024 \
-        --phi_hidden_dim 512 \
-        --feature_dim 512 \
-        --feature_learner hilp \
-        --collection_episodes 10000 \
-        --max_buffer_episodes 10000 \
-        --pretrain_steps 1000000 \
-        --batch_size 1024 \
-        --exploration rnd \
-        --wandb_project revolve-u2o-humanoid
-```
-
-**Adroit Hand:**
-```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
-python -m u2o.pretrain \
-        --env adroit \
-        --output_dir ./u2o_pretrained_adroit \
-        --z_dim 50 \
-        --hidden_dim 1024 \
-        --phi_hidden_dim 512 \
-        --feature_dim 512 \
-        --feature_learner hilp \
-        --collection_episodes 10000 \
-        --max_buffer_episodes 10000 \
-        --pretrain_steps 1000000 \
-        --batch_size 1024 \
-        --exploration rnd \
-        --wandb_project u20pretrain-adroit
-```
-
-| Output File | Description |
-|-------------|-------------|
-| `agent_checkpoint.pt` | Pretrained policy (actor + successor features + HILP feature learner) |
-| `replay_buffer.npz` | Collected exploration transitions for offline data mixing |
-| `pretrain_config.json` | Full config for reproducibility (env, obs_dim, action_dim, hyperparams) |
-
-#### Step 2: Run Evolution
+Run pretrain first (see above), then:
 
 **Humanoid + U2O:**
 ```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
-        u2o.enabled=true \
-        u2o.pretrained_dir=./u2o_pretrained_humanoid \
-        environment.name="HumanoidEnv" \
-        evolution.num_generations=5 \
-        evolution.individuals_per_generation=12 \
-        database.num_islands=3 \
-        database.num_gpus=0 \
-        data_paths.run=1 \
-        wandb.project=humanoid-u2o
+    u2o.enabled=true \
+    u2o.pretrained_dir=./u2o_pretrained_humanoid \
+    environment.name="HumanoidEnv" \
+    evolution.num_generations=5 \
+    evolution.individuals_per_generation=12 \
+    database.num_islands=3 \
+    database.num_gpus=0 \
+    data_paths.run=600 \
+    wandb.project=humanoid-u2o
 ```
 
-**Adroit Hand + U2O:**
+**AdroitHand + U2O:**
 ```shell
-export ROOT_PATH='/home/ubuntu/adroithand/zeroshotRevolve'
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 export OPENAI_API_KEY='<your openai key>'
 python main.py \
-        u2o.enabled=true \
-        u2o.pretrained_dir=./u2o_pretrained_adroit \
-        environment.name="AdroitHandDoorEnv" \
-        evolution.num_generations=5 \
-        evolution.individuals_per_generation=12 \
-        database.num_islands=3 \
-        database.num_gpus=0 \
-        data_paths.run=1 \
-        wandb.project=adroit-u2o
+    u2o.enabled=true \
+    u2o.pretrained_dir=./u2o_pretrained_adroit \
+    environment.name="AdroitHandDoorEnv" \
+    evolution.num_generations=5 \
+    evolution.individuals_per_generation=12 \
+    database.num_islands=3 \
+    database.num_gpus=0 \
+    data_paths.run=1 \
+    wandb.project=adroit-u2o
 ```
 
-Each candidate reward function in the evolutionary loop goes through:
-1. **Skill inference**: evaluate the candidate reward on the offline replay buffer, solve z* = lstsq(φ, r) to find the optimal skill direction
-2. **Fine-tune**: collect online data with policy conditioned on z*, mix with offline buffer, update successor features and actor with task rewards
-3. **Checkpoint**: save policy weights as this individual's checkpoint for the next generation to inherit
+Per-candidate fine-tuning:
+1. **Skill inference**: evaluate the reward function on the offline replay buffer → solve `z* = lstsq(φ, r)` (no gradient, no retraining)
+2. **Fine-tune**: collect online rollouts with π(·|s, z*), mix 50/50 with offline buffer, update SF networks and actor with task rewards
+3. **Checkpoint**: save policy weights for the next generation to inherit
+
+---
 
 ## Project Structure
 
 ```
 Revolve/
-├── main.py                     # Main evolutionary loop
-├── modules.py                  # Reward generation, policy training, evaluation
+├── main.py                     # Evolutionary loop entry point
+├── modules.py                  # Reward generation, policy training, fitness evaluation
 ├── rewards_database.py         # Island-based population management
-├── utils.py                    # Utilities
-├── prompts/                    # LLM prompts (mutation, crossover)
-├── evolutionary_utils/         # Island/Individual entities
-├── rl_agent/                   # RL training and evaluation
-│   ├── main.py                 # SAC training + fine-tuning
-│   ├── HumanoidEnv.py          # Humanoid environment (obs_dim=376, action_dim=17)
-│   ├── AdroitEnv.py            # Adroit manipulation environment
-│   └── evaluate.py             # Fitness evaluation
-├── u2o/                        # Skill-conditioned policy module
-│   ├── agent.py                # SFAgent: actor + successor features + skill inference
-│   ├── fb_modules.py           # Network building blocks (Actor, ForwardMap, BackwardMap)
-│   ├── networks.py             # Feature learners (HILP, Laplacian, Contrastive, ICM, etc.)
-│   ├── replay_buffer.py        # Episode-based replay buffer with future/goal sampling
-│   ├── utils.py                # Utilities (TruncatedNormal, soft_update, schedule, etc.)
-│   ├── wrappers.py             # EpisodeMonitor wrapper
-│   └── pretrain.py             # Pretraining script (data collection + offline training)
-├── human_feedback/             # Elo scoring for human evaluation
-└── cfg/                        # Hydra configs
-    ├── generate.yaml           # Evolution + policy config
-    └── train.yaml              # RL training config
+├── prompts/                    # LLM prompts
+│   ├── env_input_adroit        # AdroitHand observation space doc for LLM
+│   └── ...
+├── rl_agent/
+│   ├── main.py                 # SAC training + U2O fine-tuning
+│   ├── HumanoidEnv.py          # obs=376, action=17
+│   ├── AdroitEnv.py            # obs=39, action=28; fitness = door_hinge angle
+│   └── evaluate.py             # Fitness scoring
+├── u2o/
+│   ├── pretrain.py             # Pretraining script (Phase 1 + Phase 2)
+│   ├── agent.py                # SFAgent: HILP + successor features + skill inference
+│   ├── networks.py             # Feature learners (HILP, ICM, Laplacian, ...)
+│   ├── fb_modules.py           # Actor, ForwardMap building blocks
+│   ├── replay_buffer.py        # Episode buffer with geometric future sampling
+│   └── utils.py                # TruncatedNormal, soft_update, schedule, ...
+├── human_feedback/             # Elo scoring
+└── cfg/
+    ├── generate.yaml           # Evolution + U2O config
+    └── train.yaml              # SAC training config
 ```
 
-## Architecture
+---
 
-The skill-conditioned policy implements the **Successor Feature (SF)** framework:
+## Key Hyperparameters
 
-- **HILP Feature Learner**: dual φ networks with expectile regression learning temporal-distance value functions. Supports pluggable feature learners (HILP, Laplacian, Contrastive, ICM, AutoEncoder, Identity).
-- **Successor Features**: dual forward maps F(s,z,a) predicting φ(s'), enabling skill-conditioned Q-learning via Q(s,a) = F(s,z,a)ᵀ z.
-- **Skill-Conditioned Actor**: policy π(a|s,z) outputting TruncatedNormal actions, conditioned on observation and skill vector.
-- **Skill Inference**: given a task reward r, solve z* = lstsq(φ, r) to find the optimal skill direction without any additional training.
-- **Mixed Online/Offline Training**: fine-tuning combines newly collected online data with the pretrained offline replay buffer (50/50 split).
-
-## Configuration
-
-All parameters in `cfg/generate.yaml`:
+`cfg/generate.yaml` (U2O section — must match pretrain args):
 
 ```yaml
 u2o:
-  enabled: false                    # toggle pretraining on/off
+  enabled: false
   pretrained_dir: ${root_dir}/u2o_pretrained
-  # Architecture (must match pretrain)
-  z_dim: 50                         # skill vector dimension
-  hidden_dim: 1024                  # network hidden size
-  phi_hidden_dim: 512               # feature network hidden size
-  feature_dim: 512                  # feature output dimension
-  feature_learner: hilp             # feature learning method
-  hilp_discount: 0.98               # HILP temporal discount
-  hilp_expectile: 0.5               # expectile for value learning
-  # Training
-  lr: 1e-4                          # learning rate
-  batch_size: 1024                  # batch size
-  finetune_steps: 500000            # fine-tuning steps per reward function
-  discount: 0.98                    # MDP discount
-  sf_target_tau: 0.01               # soft update rate for target networks
-  # Replay buffer
-  future: 0.99                      # future sampling discount
-  p_randomgoal: 0.375               # random goal sampling probability
+  z_dim: 50
+  hidden_dim: 1024
+  phi_hidden_dim: 512
+  feature_dim: 512
+  feature_learner: hilp
+  hilp_discount: 0.98
+  hilp_expectile: 0.5
+  lr: 1e-4
+  batch_size: 1024
+  finetune_steps: 500000
+  discount: 0.98
+  sf_target_tau: 0.01
+  future: 0.99
+  p_randomgoal: 0.375
 ```
 
-Pretrain script arguments:
+`u2o.pretrain` CLI arguments:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--env` | `humanoid` | Environment: `humanoid`, `adroit` (extensible via `ENV_REGISTRY`) |
-| `--output_dir` | `./u2o_pretrained` | Output directory |
-| `--z_dim` | `50` | Skill vector dimension |
-| `--hidden_dim` | `1024` | Network hidden size |
-| `--phi_hidden_dim` | `512` | Feature network hidden size |
-| `--feature_dim` | `512` | Feature output dimension |
-| `--feature_learner` | `hilp` | Feature learning method (hilp, laplacian, contrastive, icm, etc.) |
-| `--collection_episodes` | `10000` | Episodes of random/RND data to collect |
-| `--max_buffer_episodes` | `10000` | Replay buffer capacity in episodes |
+| `--env` | `humanoid` | `humanoid` or `adroit_door` |
+| `--exploration` | `random` | `rnd` (Humanoid) or `d4rl` (AdroitHand) |
+| `--d4rl_dataset` | — | Required for `d4rl`: e.g. `door-cloned-v1` |
+| `--collection_episodes` | `10000` | RND episodes to collect (unused for d4rl) |
+| `--max_buffer_episodes` | `10000` | Buffer capacity in episodes |
 | `--pretrain_steps` | `1000000` | Offline training steps |
-| `--batch_size` | `1024` | Batch size for training |
+| `--batch_size` | `1024` | Training batch size |
+| `--z_dim` | `50` | Skill vector dimension |
+| `--hidden_dim` | `1024` | SF/actor hidden size |
+| `--phi_hidden_dim` | `512` | HILP φ network hidden size |
+| `--feature_dim` | `512` | Intermediate feature dimension |
+| `--hilp_discount` | `0.98` | HILP temporal discount γ |
+| `--hilp_expectile` | `0.5` | Expectile τ for value regression |
 | `--lr` | `1e-4` | Learning rate |
-| `--discount` | `0.98` | MDP discount factor |
-| `--hilp_discount` | `0.98` | HILP temporal discount |
-| `--hilp_expectile` | `0.5` | Expectile for value learning |
-| `--device` | `auto` | `cuda` or `cpu` |
+| `--discount` | `0.98` | MDP discount for replay buffer |
+| `--device` | `auto` | `cuda`, `mps`, or `cpu` |
+| `--wandb_project` | — | W&B project (optional) |
 
-## Other Utilities
-* LLM prompts are in `prompts/`.
-* Human preference scoring (Elo) is in `human_feedback/`.
+---
 
 ## Acknowledgements
 

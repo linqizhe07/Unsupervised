@@ -74,6 +74,7 @@ def create_dummy_adroit_env():
         group_id="pretrain",
         llm_model="pretrain",
         baseline="pretrain",
+        reward_history_file=os.path.join(tmp_dir, "reward_history.json"),
         max_episode_steps=400,
         mode="train",
     )
@@ -86,6 +87,7 @@ def create_dummy_adroit_env():
 ENV_REGISTRY = {
     "humanoid": (376, 17, create_dummy_humanoid_env),
     "adroit":   (39,  28, create_dummy_adroit_env),
+    "adroit_door": (39, 28, create_dummy_adroit_env),
     # "carla": (128, 2, create_dummy_carla_env),  # future: autonomous driving
 }
 
@@ -97,6 +99,118 @@ def create_env(env_name: str):
         raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
     obs_dim, action_dim, factory_fn = ENV_REGISTRY[env_name]
     return factory_fn(), obs_dim, action_dim
+
+
+def load_d4rl_data(
+    d4rl_dataset_name: str,
+    replay_buffer: ReplayBuffer,
+    max_episodes: int = None,
+    expected_obs_dim: int = None,
+    expected_action_dim: int = None,
+) -> int:
+    """Load a D4RL offline dataset into the replay buffer.
+
+    Splits flat transitions into episodes using raw D4RL
+    terminals/timeouts markers, then feeds them into
+    ReplayBuffer.add_transition() so the same HILP/SF
+    pretraining loop can run unchanged.
+
+    Args:
+        d4rl_dataset_name: D4RL dataset id, e.g. 'door-human-v1',
+                           'door-cloned-v1', 'door-expert-v1'.
+        replay_buffer:     ReplayBuffer to populate.
+        max_episodes:      Optional cap on number of episodes to load.
+        expected_obs_dim:  Optional observation dimension check.
+        expected_action_dim: Optional action dimension check.
+
+    Returns:
+        Total number of transitions loaded.
+    """
+    try:
+        import gym
+        import d4rl
+    except ImportError as exc:
+        raise ImportError(
+            "d4rl is required for GCRL pretraining.\n"
+            "Install with: pip install git+https://github.com/Farama-Foundation/d4rl.git"
+        ) from exc
+
+    env = gym.make(d4rl_dataset_name)
+    dataset = env.get_dataset()
+    max_episode_steps = getattr(env, "_max_episode_steps", None)
+
+    observations = dataset["observations"].astype(np.float32)
+    actions = dataset["actions"].astype(np.float32)
+    actions = np.clip(actions, -(1 - 1e-5), 1 - 1e-5)
+    rewards = dataset["rewards"].astype(np.float32)
+    terminals = dataset["terminals"].astype(bool)
+
+    if expected_obs_dim is not None and observations.shape[-1] != expected_obs_dim:
+        raise ValueError(
+            f"D4RL dataset '{d4rl_dataset_name}' has obs_dim={observations.shape[-1]}, "
+            f"but env expects obs_dim={expected_obs_dim}."
+        )
+    if expected_action_dim is not None and actions.shape[-1] != expected_action_dim:
+        raise ValueError(
+            f"D4RL dataset '{d4rl_dataset_name}' has action_dim={actions.shape[-1]}, "
+            f"but env expects action_dim={expected_action_dim}."
+        )
+
+    next_obs_data = dataset.get("next_observations")
+    if next_obs_data is not None:
+        next_obs_data = next_obs_data.astype(np.float32)
+    timeouts = dataset.get("timeouts")
+    if timeouts is not None:
+        timeouts = timeouts.astype(bool)
+
+    n = len(observations)
+    total_steps = 0
+    episode_count = 0
+    episode_step = 0
+
+    # Process all n transitions. When next_observations is absent, the last transition
+    # (i = n-1) has no valid next_obs so we stop at n-1 in that case.
+    n_iter = n if next_obs_data is not None else n - 1
+
+    for i in range(n_iter):
+        done = bool(terminals[i])
+        timeout = bool(timeouts[i]) if timeouts is not None else (
+            max_episode_steps is not None and episode_step == max_episode_steps - 1
+        )
+        next_obs = next_obs_data[i] if next_obs_data is not None else observations[i + 1]
+        episode_done = done or timeout
+        # Bug fix: timeout is NOT a true terminal — use discount=1.0 for timeouts so
+        # the bootstrapped TD target is not incorrectly zeroed out.
+        replay_buffer.add_transition(
+            obs=observations[i],
+            action=actions[i],
+            reward=float(rewards[i]),
+            next_obs=next_obs,
+            done=episode_done,
+            discount=0.0 if done else 1.0,
+        )
+        total_steps += 1
+
+        if episode_done:
+            episode_count += 1
+            episode_step = 0
+            if max_episodes is not None and episode_count >= max_episodes:
+                break
+        else:
+            episode_step += 1
+
+    # Store last partial episode (dataset may not end with terminal=True)
+    if replay_buffer._current_episode:
+        replay_buffer._store_episode()
+        episode_count += 1
+
+    env.close()
+
+    print(
+        f"[D4RL] Loaded {d4rl_dataset_name}: "
+        f"{episode_count} episodes, {total_steps} transitions"
+    )
+    return total_steps
 
 
 def collect_random_data(
@@ -340,6 +454,7 @@ def validate_pretrain_args(
     log_every: int,
     future: float,
     p_randomgoal: float,
+    exploration: str = "random",
 ) -> None:
     """Validate pretraining arguments with actionable error messages."""
     if feature_learner not in FEATURE_LEARNERS:
@@ -347,7 +462,7 @@ def validate_pretrain_args(
         raise ValueError(
             f"Unsupported feature_learner='{feature_learner}'. Supported: {choices}"
         )
-    if collection_episodes <= 0:
+    if exploration != "d4rl" and collection_episodes <= 0:
         raise ValueError("collection_episodes must be > 0.")
     if pretrain_steps < 0:
         raise ValueError("pretrain_steps must be >= 0.")
@@ -410,6 +525,7 @@ def pretrain(
     seed: int = 0,
     device: str = None,
     exploration: str = "random",
+    d4rl_dataset: str = None,
     wandb_project: str = None,
     wandb_entity: str = None,
     wandb_run_name: str = None,
@@ -431,7 +547,10 @@ def pretrain(
         log_every=log_every,
         future=future,
         p_randomgoal=p_randomgoal,
+        exploration=exploration,
     )
+    if exploration == "d4rl" and not d4rl_dataset:
+        raise ValueError("--d4rl_dataset is required when --exploration d4rl is set.")
     device = resolve_device(device)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -491,6 +610,7 @@ def pretrain(
         "eval_every": eval_every,
         "log_every": log_every,
         "exploration": exploration,
+        "d4rl_dataset": d4rl_dataset,
         "device": device,
         "seed": seed,
     }
@@ -517,41 +637,70 @@ def pretrain(
     print(f"  Env: {env_name} (obs_dim={obs_dim}, action_dim={action_dim})")
     print(f"  Device: {device}")
     print(f"  z_dim: {z_dim}, feature_learner: {feature_learner}")
-    print(f"  Collection episodes: {collection_episodes}")
+    if exploration == "d4rl":
+        print(f"  Data source: D4RL dataset '{d4rl_dataset}' (GCRL pipeline)")
+    else:
+        print(f"  Collection episodes: {collection_episodes}")
     print(f"  Pretrain steps: {pretrain_steps}")
     print(f"  Output: {output_dir}")
     print(f"  Wandb: {'enabled' if use_wandb else 'disabled'}")
 
     # Create replay buffer
+    replay_episode_length = max_episode_steps + 1
+    if exploration == "d4rl" and d4rl_dataset is not None:
+        try:
+            import gym
+            import d4rl  # noqa: F401
+
+            probe_env = gym.make(d4rl_dataset)
+            dataset_horizon = getattr(probe_env, "_max_episode_steps", None)
+            probe_env.close()
+            if dataset_horizon is not None:
+                replay_episode_length = max(replay_episode_length, int(dataset_horizon) + 1)
+        except ImportError:
+            # load_d4rl_data will raise a clearer error shortly after.
+            pass
+
     replay_buffer = ReplayBuffer(
         max_episodes=max_buffer_episodes,
         discount=discount,
         future=future,
         p_randomgoal=p_randomgoal,
-        max_episode_length=max_episode_steps + 1,
+        max_episode_length=replay_episode_length,
     )
 
     # ============================================================
     # Phase 1: Data Collection
     # ============================================================
-    env, _, _ = create_env(env_name)
-    try:
-        if exploration == "rnd":
-            print(
-                f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---"
-            )
-            total_collected = collect_rnd_data(
-                env, replay_buffer, collection_episodes, max_episode_steps, device=device
-            )
-        else:
-            print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
-            total_collected = collect_random_data(
-                env, replay_buffer, collection_episodes, max_episode_steps
-            )
-    finally:
-        env.close()
+    if exploration == "d4rl":
+        # GCRL pipeline: load D4RL offline dataset directly (no env needed)
+        print(f"\n--- Phase 1: Loading D4RL dataset '{d4rl_dataset}' (GCRL pipeline) ---")
+        total_collected = load_d4rl_data(
+            d4rl_dataset_name=d4rl_dataset,
+            replay_buffer=replay_buffer,
+            max_episodes=max_buffer_episodes,
+            expected_obs_dim=obs_dim,
+            expected_action_dim=action_dim,
+        )
+    else:
+        env, _, _ = create_env(env_name)
+        try:
+            if exploration == "rnd":
+                print(
+                    f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---"
+                )
+                total_collected = collect_rnd_data(
+                    env, replay_buffer, collection_episodes, max_episode_steps, device=device
+                )
+            else:
+                print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
+                total_collected = collect_random_data(
+                    env, replay_buffer, collection_episodes, max_episode_steps
+                )
+        finally:
+            env.close()
 
-    print(f"Collected {total_collected} transitions in {len(replay_buffer)} episodes")
+    print(f"Loaded {total_collected} transitions in {len(replay_buffer)} episodes")
     if len(replay_buffer) == 0:
         raise RuntimeError(
             "Replay buffer is empty after data collection. "
@@ -714,7 +863,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every", type=int, default=500000)
     parser.add_argument("--log_every", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exploration", type=str, default="random", choices=["random", "rnd"])
+    parser.add_argument("--exploration", type=str, default="random", choices=["random", "rnd", "d4rl"])
+    parser.add_argument("--d4rl_dataset", type=str, default=None,
+                        help="D4RL dataset name for GCRL pipeline, e.g. 'door-human-v1', 'door-cloned-v1', 'door-expert-v1'")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--wandb_project", type=str, default=None)
     parser.add_argument("--wandb_entity", type=str, default=None)
@@ -765,4 +916,5 @@ if __name__ == "__main__":
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
         wandb_run_name=args.wandb_run_name,
+        d4rl_dataset=args.d4rl_dataset,
     )

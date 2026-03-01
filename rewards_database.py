@@ -162,13 +162,13 @@ class RevolveDatabase:
                 )
                 model_checkpoint_path = (
                     f"{self.reward_fn_dir}/island_{island_id}/model_checkpoints/"
-                    f"{generation_id}_{counter_id}.h5"
+                    f"{generation_id}_{counter_id}.zip"
                 )
                 RevolveDatabase.delete_file(
                     reward_history_path, "reward history (.json) file"
                 )
                 RevolveDatabase.delete_file(
-                    model_checkpoint_path, "model checkpoint (.h5) file"
+                    model_checkpoint_path, "model checkpoint (.zip) file"
                 )
 
             # if island size exceeds max size, discard individual with the lowest score
