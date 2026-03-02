@@ -694,24 +694,28 @@ def pretrain(
     # ============================================================
     if exploration == "d4rl":
         # GCRL pipeline: load D4RL offline datasets directly (no env needed).
-        # Each dataset gets an equal share of the buffer (max_buffer_episodes / N).
-        # The last dataset gets any remaining slots to avoid rounding waste.
+        #
+        # Datasets are loaded in the order specified. The circular buffer naturally
+        # handles overflow: when total episodes across all datasets exceeds
+        # max_buffer_episodes, the oldest episodes (from the first datasets) are
+        # overwritten by the newest ones.
+        #
+        # Recommended order for door tasks:
+        #   door-cloned-v1,door-expert-v1,door-human-v1
+        # This way the small but high-quality human/expert trajectories are loaded
+        # last and are guaranteed to remain in the buffer, while cloned provides the
+        # bulk of state-space coverage. Equal-per-dataset caps are NOT used because
+        # door-human-v1 has only ~25 episodes; capping cloned at 3333 wastes buffer
+        # capacity without improving the sampling distribution.
         num_datasets = len(d4rl_datasets)
-        per_dataset_episodes = max_buffer_episodes // num_datasets
         print(f"\n--- Phase 1: Loading {num_datasets} D4RL dataset(s) (GCRL pipeline) ---")
         total_collected = 0
         for i, ds_name in enumerate(d4rl_datasets):
-            # Last dataset takes any remaining capacity.
-            alloc = (
-                max_buffer_episodes - (num_datasets - 1) * per_dataset_episodes
-                if i == num_datasets - 1
-                else per_dataset_episodes
-            )
-            print(f"  [{i+1}/{num_datasets}] {ds_name}  (up to {alloc} episodes)")
+            print(f"  [{i+1}/{num_datasets}] {ds_name}  (up to {max_buffer_episodes} episodes)")
             total_collected += load_d4rl_data(
                 d4rl_dataset_name=ds_name,
                 replay_buffer=replay_buffer,
-                max_episodes=alloc,
+                max_episodes=max_buffer_episodes,
                 expected_obs_dim=obs_dim,
                 expected_action_dim=action_dim,
             )
