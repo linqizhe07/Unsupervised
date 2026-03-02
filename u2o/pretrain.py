@@ -577,6 +577,8 @@ def pretrain(
     )
     if exploration == "d4rl" and not d4rl_dataset:
         raise ValueError("--d4rl_dataset is required when --exploration d4rl is set.")
+    # Parse comma-separated dataset names
+    d4rl_datasets = [s.strip() for s in d4rl_dataset.split(",")] if d4rl_dataset else []
     device = resolve_device(device)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -636,7 +638,7 @@ def pretrain(
         "eval_every": eval_every,
         "log_every": log_every,
         "exploration": exploration,
-        "d4rl_dataset": d4rl_dataset,
+        "d4rl_dataset": d4rl_dataset,  # original comma-separated string kept for logging
         "device": device,
         "seed": seed,
     }
@@ -664,7 +666,7 @@ def pretrain(
     print(f"  Device: {device}")
     print(f"  z_dim: {z_dim}, feature_learner: {feature_learner}")
     if exploration == "d4rl":
-        print(f"  Data source: D4RL dataset '{d4rl_dataset}' (GCRL pipeline)")
+        print(f"  Data source: D4RL datasets {d4rl_datasets} (GCRL pipeline)")
     else:
         print(f"  Collection episodes: {collection_episodes}")
     print(f"  Pretrain steps: {pretrain_steps}")
@@ -673,10 +675,11 @@ def pretrain(
 
     # Create replay buffer
     replay_episode_length = max_episode_steps + 1
-    if exploration == "d4rl" and d4rl_dataset is not None:
-        dataset_horizon = _D4RL_DATASET_INFO.get(d4rl_dataset, {}).get("max_episode_steps")
-        if dataset_horizon is not None:
-            replay_episode_length = max(replay_episode_length, int(dataset_horizon) + 1)
+    if exploration == "d4rl" and d4rl_datasets:
+        for _ds in d4rl_datasets:
+            dataset_horizon = _D4RL_DATASET_INFO.get(_ds, {}).get("max_episode_steps")
+            if dataset_horizon is not None:
+                replay_episode_length = max(replay_episode_length, int(dataset_horizon) + 1)
 
     replay_buffer = ReplayBuffer(
         max_episodes=max_buffer_episodes,
@@ -690,15 +693,28 @@ def pretrain(
     # Phase 1: Data Collection
     # ============================================================
     if exploration == "d4rl":
-        # GCRL pipeline: load D4RL offline dataset directly (no env needed)
-        print(f"\n--- Phase 1: Loading D4RL dataset '{d4rl_dataset}' (GCRL pipeline) ---")
-        total_collected = load_d4rl_data(
-            d4rl_dataset_name=d4rl_dataset,
-            replay_buffer=replay_buffer,
-            max_episodes=max_buffer_episodes,
-            expected_obs_dim=obs_dim,
-            expected_action_dim=action_dim,
-        )
+        # GCRL pipeline: load D4RL offline datasets directly (no env needed).
+        # Each dataset gets an equal share of the buffer (max_buffer_episodes / N).
+        # The last dataset gets any remaining slots to avoid rounding waste.
+        num_datasets = len(d4rl_datasets)
+        per_dataset_episodes = max_buffer_episodes // num_datasets
+        print(f"\n--- Phase 1: Loading {num_datasets} D4RL dataset(s) (GCRL pipeline) ---")
+        total_collected = 0
+        for i, ds_name in enumerate(d4rl_datasets):
+            # Last dataset takes any remaining capacity.
+            alloc = (
+                max_buffer_episodes - (num_datasets - 1) * per_dataset_episodes
+                if i == num_datasets - 1
+                else per_dataset_episodes
+            )
+            print(f"  [{i+1}/{num_datasets}] {ds_name}  (up to {alloc} episodes)")
+            total_collected += load_d4rl_data(
+                d4rl_dataset_name=ds_name,
+                replay_buffer=replay_buffer,
+                max_episodes=alloc,
+                expected_obs_dim=obs_dim,
+                expected_action_dim=action_dim,
+            )
     else:
         env, _, _ = create_env(env_name)
         try:
@@ -882,7 +898,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--exploration", type=str, default="random", choices=["random", "rnd", "d4rl"])
     parser.add_argument("--d4rl_dataset", type=str, default=None,
-                        help="D4RL dataset name for GCRL pipeline, e.g. 'door-human-v1', 'door-cloned-v1', 'door-expert-v1'")
+                        help="Comma-separated D4RL dataset names for GCRL pipeline. "
+                             "E.g. 'door-human-v1,door-cloned-v1,door-expert-v1'. "
+                             "Buffer capacity is split equally across datasets.")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--wandb_project", type=str, default=None)
     parser.add_argument("--wandb_entity", type=str, default=None)
