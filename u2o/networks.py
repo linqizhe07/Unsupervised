@@ -54,10 +54,11 @@ class HILP(FeatureLearner):
         self.phi2 = mlp(*layers)
         self.target_phi1 = mlp(*layers)
         self.target_phi2 = mlp(*layers)
-        self.target_phi1.load_state_dict(self.phi1.state_dict())
-        self.target_phi2.load_state_dict(self.phi2.state_dict())
 
         self.apply(utils.weight_init)
+
+        self.target_phi1.load_state_dict(self.phi1.state_dict())
+        self.target_phi2.load_state_dict(self.phi2.state_dict())
 
         # Running mean and std for feature normalization
         self.register_buffer("running_mean", torch.zeros(feature_dim))
