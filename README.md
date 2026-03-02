@@ -15,7 +15,7 @@ The system combines three components:
 
   Humanoid: RND exploration  ──┐
                                ├──→ ReplayBuffer
-  AdroitHand: D4RL dataset ───┘         │
+  AdroitHand: D4RL datasets ──┘   (cloned + expert + human, circular buffer)         │
                                     HILP φ(s): temporal-distance features
                                          │
                                     SF F(s,z,a): skill-conditioned Q
@@ -39,11 +39,17 @@ The system combines three components:
 
 ## Installation
 
-```shell
+```shell for running locally
 git clone https://github.com/Linqizhe07/zeroshotRevolve.git
-cd Unsupervised
+cd zeroshotRevolve
 conda create -n revolve python=3.10
 conda activate revolve
+pip install -e .
+```
+
+```shell for instance
+python3 -m venv venv1(1 for Adroithand 2 for Humanoid)
+source venv/bin/activate
 pip install -e .
 ```
 
@@ -123,7 +129,7 @@ python -m u2o.pretrain \
     --phi_hidden_dim 512 \
     --feature_dim 512 \
     --feature_learner hilp \
-    --wandb_project revolve-u2o-humanoid
+    --wandb_project pretrain-humanoid
 ```
 
 ### AdroitHand — GCRL Pipeline (D4RL offline dataset)
@@ -141,20 +147,31 @@ D4RL dataset (door-human-v1 / door-cloned-v1 / door-expert-v1)
 
 Available datasets:
 
-| `--d4rl_dataset` | Episodes | Notes |
-|------------------|----------|-------|
-| `door-human-v1` | ~25 | MOCO-captured human demos — highest quality |
-| `door-cloned-v1` | ~5000 | BC rollouts from human demos — most data |
-| `door-expert-v1` | ~200 | Expert policy rollouts |
+| Dataset | Episodes | Notes |
+|---------|----------|-------|
+| `door-human-v1` | ~25 | MOCO-captured human demos — highest quality but very few |
+| `door-cloned-v1` | ~5000 | BC rollouts from human demos — largest, most diverse coverage |
+| `door-expert-v1` | ~200 | Expert policy rollouts — reliable successes |
+
+**Multi-dataset loading** (recommended): pass a comma-separated list to `--d4rl_dataset`. Datasets are loaded in order into a circular replay buffer; **load large datasets first and small/high-quality ones last**, so the small datasets are never overwritten.
+
+```
+Loading order:  cloned (fills buffer) → expert (overwrites oldest cloned) → human (idem)
+Buffer result:  9775 cloned + 200 expert + 25 human  (with max_buffer_episodes=10000)
+Sampling:       uniform over all episodes — each dataset contributes proportionally to its size
+```
+
+> **Why not equal allocation?** `door-human-v1` has only ~25 episodes. Capping cloned at `max_buffer_episodes / 3 = 3333` to "balance" it would waste 3308 buffer slots and reduce cloned's state-coverage contribution without meaningfully increasing human's share (it would still be < 1 % of training batches).
 
 ```shell
+pip uninstall h5py -y && pip install h5py
 export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 python -m u2o.pretrain \
     --env adroit_door \
     --output_dir ./u2o_pretrained_adroit \
     --exploration d4rl \
-    --d4rl_dataset door-cloned-v1 \
-    --max_buffer_episodes 5000 \
+    --d4rl_dataset door-cloned-v1,door-expert-v1,door-human-v1 \
+    --max_buffer_episodes 10000 \
     --pretrain_steps 1000000 \
     --batch_size 1024 \
     --z_dim 50 \
@@ -162,7 +179,14 @@ python -m u2o.pretrain \
     --phi_hidden_dim 512 \
     --feature_dim 512 \
     --feature_learner hilp \
-    --wandb_project Pretrain-adroit
+    --lr_coef 2.0 \
+    --wandb_project pretrain-adroit_lr2
+```
+
+Single-dataset usage still works unchanged:
+
+```shell
+python -m u2o.pretrain --exploration d4rl --d4rl_dataset door-cloned-v1 ...
 ```
 
 ### Offline Training (Phase 2) — Both Environments
@@ -325,7 +349,7 @@ u2o:
 |----------|---------|-------------|
 | `--env` | `humanoid` | `humanoid` or `adroit_door` |
 | `--exploration` | `random` | `rnd` (Humanoid) or `d4rl` (AdroitHand) |
-| `--d4rl_dataset` | — | Required for `d4rl`: e.g. `door-cloned-v1` |
+| `--d4rl_dataset` | — | Required for `d4rl`. Comma-separated list, e.g. `door-cloned-v1,door-expert-v1,door-human-v1`. Load large datasets first so small ones survive in the circular buffer. |
 | `--collection_episodes` | `10000` | RND episodes to collect (unused for d4rl) |
 | `--max_buffer_episodes` | `10000` | Buffer capacity in episodes |
 | `--pretrain_steps` | `1000000` | Offline training steps |
