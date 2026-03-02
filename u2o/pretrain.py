@@ -86,7 +86,6 @@ def create_dummy_adroit_env():
 # -----------------------------------------------------------------------
 ENV_REGISTRY = {
     "humanoid": (376, 17, create_dummy_humanoid_env),
-    "adroit":   (39,  28, create_dummy_adroit_env),
     "adroit_door": (39, 28, create_dummy_adroit_env),
     # "carla": (128, 2, create_dummy_carla_env),  # future: autonomous driving
 }
