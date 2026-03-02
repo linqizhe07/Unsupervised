@@ -179,8 +179,7 @@ python -m u2o.pretrain \
     --phi_hidden_dim 512 \
     --feature_dim 512 \
     --feature_learner hilp \
-    --lr_coef 2.0 \
-    --wandb_project pretrain-adroit_lr2
+    --wandb_project pretrain-adroit
 ```
 
 Single-dataset usage still works unchanged:
