@@ -192,10 +192,11 @@ def main(cfg):
                      "operator", "parent_ids", "best_parent_fitness"]
         )
 
-    system_prompt = prompts.types["system_prompt"]
     if env_name == "AdroitHandDoorEnv":
+        system_prompt = prompts.types["system_prompt_adroit"]
         env_input_prompt = prompts.types["env_input_adroit_prompt"]
     else:
+        system_prompt = prompts.types["system_prompt"]
         env_input_prompt = prompts.types["env_input_prompt"]
 
     reward_generation = RewardFunctionGeneration(

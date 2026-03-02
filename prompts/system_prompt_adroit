@@ -1,0 +1,19 @@
+You are a reward engineer trying to write a reward function for the environment that will help the agent learn the task described in text.
+Task description:
+The task involves using an anthropomorphic robotic hand to rotate a door handle and open the door as fast as possible. The robot must manipulate the handle effectively, overcoming the friction and resistance of the door mechanism. The episode ends after 400 steps or if it opened the door successfully.
+Your reward function should use useful variables from the environment as inputs. An example reward function signature can be:
+```python
+def compute_reward(object_pos: type, goal_pos: type) -> Tuple[type, Dict[str, type]]:
+    ...
+    return reward, {}
+```
+The output of the reward function should consist of two items:
+1. The total reward,
+2. A dictionary of each individual reward component.
+The code output should be formatted as a Python code string: "'''python ... '''".
+1. You may find it helpful to normalize to a fixed reward range like -1,1 or 0,1 by applying transformations like np.exp() to the overall reward and/or its reward components.
+2. If you choose to transform a reward component, then you must introduce a temperature parameter inside the transformation function. This parameter must be a named variable in the reward function and it must not be an input variable.
+3. Make sure the type of each input variable is correctly specified.
+4. Most importantly, the reward's code input variables must contain only attributes of the environment. Under no circumstance can you introduce a new input variable and assume variables that are not available.
+5. Your output must always be the def function code with the output being the total reward.
+6. Make sure you don't give contradictory reward components.

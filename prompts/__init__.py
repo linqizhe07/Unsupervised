@@ -1,4 +1,5 @@
 system_prompt = open("prompts/system_prompt", "r").read()
+system_prompt_adroit = open("prompts/system_prompt_adroit", "r").read()
 env_input_prompt = open("prompts/env_input", "r").read()
 env_input_adroit_prompt = open("prompts/env_input_adroit", "r").read()
 mutation_auto_prompt = open("prompts/mutation_auto", "r").read()
@@ -8,6 +9,7 @@ crossover_prompt = open("prompts/crossover", "r").read()
 
 types = {
     "system_prompt": system_prompt,
+    "system_prompt_adroit": system_prompt_adroit,
     "env_input_prompt": env_input_prompt,
     "env_input_adroit_prompt": env_input_adroit_prompt,
     "mutation_auto": mutation_auto_prompt,
