@@ -59,20 +59,50 @@ class RewardLoggerCallback(BaseCallback):
 
 
 class VelocityLoggerCallback(BaseCallback):
-    def __init__(self, velocity_filepath, verbose=0):
+    def __init__(self, velocity_filepath, wandb_cfg=None, verbose=0):
         super(VelocityLoggerCallback, self).__init__(verbose)
         self.velocity_filepath = velocity_filepath
+        self.wandb_cfg = wandb_cfg
+        self._wandb_run = None
         # Ensure the directory exists
         os.makedirs(os.path.dirname(self.velocity_filepath), exist_ok=True)
 
+    def _init_wandb(self):
+        if self.wandb_cfg is None:
+            return
+        try:
+            import wandb
+            self._wandb_run = wandb.init(
+                project=self.wandb_cfg["project"],
+                entity=self.wandb_cfg.get("entity"),
+                group=self.wandb_cfg.get("group"),
+                name=self.wandb_cfg.get("name"),
+                job_type="train",
+                reinit="finish_previous",
+            )
+        except Exception as e:
+            print(f"[wandb] Failed to init in subprocess: {e}")
+            self._wandb_run = None
+
     def _on_step(self) -> bool:
+        if self._wandb_run is None and self.wandb_cfg is not None:
+            self._init_wandb()
         info = self.locals.get("infos", [])
         if len(info) > 0:
             signal = info[0].get("x_velocity") if "x_velocity" in info[0] else info[0].get("fitness_signal")
             if signal is not None:
                 with open(self.velocity_filepath, "a") as f:
                     f.write(f"{signal}\n")
+                if self._wandb_run is not None:
+                    self._wandb_run.log(
+                        {"train/fitness_signal": signal},
+                        step=self.num_timesteps,
+                    )
         return True
+
+    def _on_training_end(self) -> None:
+        if self._wandb_run is not None:
+            self._wandb_run.finish()
 
 
 #    train(env, sb3_algo, reward_func, island_id, generation_id, counter)
@@ -89,6 +119,7 @@ def train(
     model_checkpoint_path,
     output_path,
     log_dir,
+    wandb_cfg=None,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     current_timesteps = 0
@@ -97,7 +128,8 @@ def train(
         f"{generation_id}_{counter}.zip",
     )
     velocity_callback = VelocityLoggerCallback(
-        velocity_filepath=velocity_path,  # Directly use the full file path
+        velocity_filepath=velocity_path,
+        wandb_cfg=wandb_cfg,
         verbose=1,
     )
     os.makedirs(log_dir, exist_ok=True)
@@ -132,7 +164,6 @@ def train(
         current_timesteps += TIMESTEPS
 
         model.save(final_checkpoint_path)
-        env.render()
 
 
 # env=HumanoidEnv(
@@ -158,6 +189,7 @@ def run_training(
     output_path,
     log_dir,
     env_name="HumanoidEnv",
+    wandb_cfg=None,
 ):
     if env_name == "AdroitHandDoorEnv":
         from rl_agent.AdroitEnv import AdroitHandDoorEnv
@@ -197,6 +229,7 @@ def run_training(
         model_checkpoint_file,
         output_path,
         log_dir,
+        wandb_cfg=wandb_cfg,
     )
 
     # return velocity_filepath

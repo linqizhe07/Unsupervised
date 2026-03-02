@@ -259,6 +259,7 @@ class TrainPolicy:
                 self.output_log,
                 log_dir,
                 env_name=self.env_name,
+                wandb_cfg=self.wandb_cfg,
             )
         return checkpoint_file, velocity_file_path
 

@@ -308,21 +308,24 @@ def main(cfg):
                     cfg.database.rewards_dir,
                     env_name=env_name,
                 )
+                # Build wandb config for subprocess logging (both U2O and baseline)
+                ft_wandb_cfg = None
+                if wandb_run is not None:
+                    ft_wandb_cfg = {
+                        "project": wandb_cfg.get("project", "revolve"),
+                        "entity": wandb_cfg.get("entity"),
+                        "group": wandb_run.group,
+                        "name": f"train_g{generation_id}_c{counter_id}_i{island_id}",
+                    }
                 if u2o_enabled:
-                    # Build wandb config for fine-tune subprocess logging
-                    ft_wandb_cfg = None
-                    if wandb_run is not None:
-                        ft_wandb_cfg = {
-                            "project": wandb_cfg.get("project", "revolve"),
-                            "entity": wandb_cfg.get("entity"),
-                            "group": wandb_run.group,
-                        }
                     policy.enable_u2o(
                         pretrained_dir=u2o_pretrained_dir,
                         u2o_cfg=u2o_cfg,
                         parent_checkpoint_path=parent_checkpoint_path,
                         wandb_cfg=ft_wandb_cfg,
                     )
+                else:
+                    policy.wandb_cfg = ft_wandb_cfg
                 policies.append(policy)
                 island_ids.append(island_id)
                 rew_fn_strings.append(reward_func_str)
