@@ -287,6 +287,17 @@ Per-candidate fine-tuning:
 2. **Fine-tune**: collect online rollouts with π(·|s, z*), mix 50/50 with offline buffer, update SF networks and actor with task rewards
 3. **Checkpoint**: save policy weights for the next generation to inherit
 
+### LLM Prompt Selection
+
+The system message sent to the LLM is assembled per environment:
+
+| Environment | System prompt | Env input |
+|-------------|--------------|-----------|
+| `HumanoidEnv` | `prompts/system_prompt` | `prompts/env_input` |
+| `AdroitHandDoorEnv` | `prompts/system_prompt_adroit` | `prompts/env_input_adroit` |
+
+The final LLM system message = `system_prompt` + `\n` + `env_input`. The `system_prompt` files contain the task description and reward-writing rules; the `env_input` files contain the full observation-space documentation (variable names, indices, types) that the LLM uses to write syntactically correct reward functions.
+
 ---
 
 ## Project Structure
@@ -296,9 +307,15 @@ Revolve/
 ├── main.py                     # Evolutionary loop entry point
 ├── modules.py                  # Reward generation, policy training, fitness evaluation
 ├── rewards_database.py         # Island-based population management
-├── prompts/                    # LLM prompts
-│   ├── env_input_adroit        # AdroitHand observation space doc for LLM
-│   └── ...
+├── prompts/                    # LLM prompts (selected per environment at runtime)
+│   ├── system_prompt           # Humanoid: task description + reward-writing rules
+│   ├── system_prompt_adroit    # AdroitHand: task description + reward-writing rules
+│   ├── env_input               # Humanoid observation space doc
+│   ├── env_input_adroit        # AdroitHand observation space doc (obs indices, action space)
+│   ├── mutation_auto           # In-context mutation prompt
+│   ├── crossover_auto          # In-context crossover prompt
+│   ├── mutation                # Mutation prompt (non-auto baseline)
+│   └── crossover               # Crossover prompt (non-auto baseline)
 ├── rl_agent/
 │   ├── main.py                 # SAC training + U2O fine-tuning
 │   ├── HumanoidEnv.py          # obs=376, action=17
