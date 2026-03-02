@@ -85,7 +85,9 @@ class RunningMeanStd:
         self.count = total_count
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        return (x - self.mean) / (torch.sqrt(self.var) + 1e-8)
+        # Clamp var to prevent near-constant dims (common in offline datasets like
+        # door-cloned-v1) from being amplified by 1/sqrt(~0) after obs_rms converges.
+        return (x - self.mean) / (torch.sqrt(self.var.clamp(min=1e-2)) + 1e-8)
 
     def state_dict(self) -> dict:
         return {"mean": self.mean, "var": self.var, "count": self.count}
