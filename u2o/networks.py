@@ -48,7 +48,7 @@ class HILP(FeatureLearner):
             assert z_dim % 2 == 0
             feature_dim = z_dim // 2
 
-        layers = [obs_dim, hidden_dim, "ntanh", hidden_dim, "relu", feature_dim]
+        layers = [obs_dim, hidden_dim, "ntanh", hidden_dim, "relu", feature_dim, "L2"]
 
         self.phi1 = mlp(*layers)
         self.phi2 = mlp(*layers)
