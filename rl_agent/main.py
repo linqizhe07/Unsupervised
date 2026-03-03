@@ -101,8 +101,12 @@ class VelocityLoggerCallback(BaseCallback):
         return True
 
     def _on_training_end(self) -> None:
-        if self._wandb_run is not None:
-            self._wandb_run.finish()
+        # Do NOT call finish() here: train() calls model.learn() in a while loop,
+        # so _on_training_end fires after every 50k-step chunk. Finishing the run
+        # here would cause the next chunk's _on_step to log to an already-finished
+        # run and raise UsageError. Each train_policy() runs in its own subprocess
+        # (ProcessPoolExecutor spawn), so wandb auto-finishes via atexit on exit.
+        pass
 
 
 #    train(env, sb3_algo, reward_func, island_id, generation_id, counter)
