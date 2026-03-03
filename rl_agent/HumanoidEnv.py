@@ -401,6 +401,9 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
     @property
     def healthy_reward(self):
+        # NOTE: _healthy_reward and _ctrl_cost_weight are unused in Revolve —
+        # the custom LLM reward function replaces the standard Humanoid reward.
+        # Kept for API compatibility but will raise AttributeError if called.
         return (
             float(self.is_healthy or self._terminate_when_unhealthy)
             * self._healthy_reward
@@ -517,6 +520,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
     def reset_model(self):
         # self.step=0
+        self.total_steps = 0
         self.episode_start_time = time.time()
         noise_low = -self._reset_noise_scale
         noise_high = self._reset_noise_scale

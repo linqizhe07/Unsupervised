@@ -18,7 +18,8 @@ import openai
 from hydra.core.global_hydra import GlobalHydra
 from openai import OpenAI
 
-from rl_agent.evaluate import return_score
+from rl_agent.evaluate import return_score, INVALID_FITNESS
+from rl_agent.fitness_score import calculate_fitness_score
 # from rl_agent.generate_scores import generate_behaviour
 from rl_agent.main import run_training
 from utils import parse_llm_output, serialize_dict, format_human_feedback
@@ -194,7 +195,7 @@ class TrainPolicy:
             self.train_cfg = hydra.compose(config_name="train")
             logging.info("Training Config loaded")
 
-    def train_policy(self) -> Tuple[str, str]:
+    def train_policy(self) -> Tuple[str, str, str]:
         # This will define the compute_reward function dynamically
 
         reward_history_file = os.path.join(
@@ -212,6 +213,15 @@ class TrainPolicy:
             f"island_{self.island_id}/velocity_logs/velocity_{self.generation_id}_{self.counter_id}.txt",
         )
 
+        # Adroit success log: same dir as reward_history_file but .txt extension.
+        # Written by AdroitHandDoorEnv.step() as
+        # "Episode finished at step {steps}: Success=True/False".
+        # Used by calculate_fitness_score() to compute the paper's fitness formula.
+        adroit_success_log_path = os.path.join(
+            self.output_log,
+            f"island_{self.island_id}/reward_history/{self.generation_id}_{self.counter_id}.txt",
+        )
+
         model_checkpoint_path = os.path.join(
             self.output_log, f"island_{self.island_id}/model_checkpoints"
         )
@@ -224,6 +234,15 @@ class TrainPolicy:
         log_dir = os.path.join(
             self.output_log,
             f"island_{self.island_id}/log_dir/{self.generation_id}_{self.counter_id}",
+        )
+
+        # Select the evaluation log that matches the fitness function for this env:
+        #   AdroitHandDoorEnv → success log (paper's formula: σ = -steps/700 + 75/70)
+        #   HumanoidEnv       → velocity log (average goal_distance around peak)
+        eval_log_path = (
+            adroit_success_log_path
+            if self.env_name == "AdroitHandDoorEnv"
+            else velocity_file_path
         )
 
         if self.u2o_enabled:
@@ -265,7 +284,7 @@ class TrainPolicy:
                 wandb_cfg=self.wandb_cfg,
                 gpu_id=self.gpu_id,
             )
-        return checkpoint_file, velocity_file_path
+        return checkpoint_file, eval_log_path, self.env_name
 
 
 # human evaluation, fitness functions
@@ -284,19 +303,33 @@ class RewardFunctionEvaluation:
 
     @staticmethod
     def evaluate_behavior(
-            full_velocity_log_path,
+            eval_log_path: str,
+            env_name: str = "HumanoidEnv",
     ) -> Dict[str, float]:
-        fitness_score = return_score(full_velocity_log_path)
+        if env_name == "AdroitHandDoorEnv":
+            # Paper's formula: σ = -steps/700 + 75/70 (success), 0 (failure)
+            # averaged over all episodes. Returns 0 if no episodes logged.
+            try:
+                fitness_score = calculate_fitness_score(eval_log_path)
+            except FileNotFoundError:
+                logging.error(
+                    f"Adroit success log not found: {eval_log_path}; "
+                    f"returning fallback fitness {INVALID_FITNESS}."
+                )
+                fitness_score = INVALID_FITNESS
+        else:
+            fitness_score = return_score(eval_log_path)
         return {"fitness": fitness_score}
 
 
 def train_policies_in_parallel(
         policy_classes: List[TrainPolicy],
         max_workers: int = None,
-) -> List[Tuple[str, str]]:
+) -> List[Tuple[str, str, str]]:
     """
     submit multiple training policies in parallel
     max_workers: limit parallel processes to avoid OOM (None = all at once)
+    Returns list of (checkpoint_path, eval_log_path, env_name) tuples.
     """
     multiprocessing.set_start_method("spawn", force=True)
     if max_workers is None:
@@ -318,24 +351,23 @@ def train_policies_in_parallel(
                     f"gen={policy_classes[i].generation_id}, "
                     f"counter={policy_classes[i].counter_id}): {e}"
                 )
-                # Return empty paths so evaluate_policies_in_parallel scores this
-                # as INVALID_FITNESS=-1e9 via FileNotFoundError in read_values().
-                results.append((None, ""))
+                # Empty eval_log_path → FileNotFoundError → INVALID_FITNESS in evaluate_behavior.
+                results.append((None, "", policy_classes[i].env_name))
     return results
 
 
 def evaluate_policies_in_parallel(
-        ckpt_and_performance_paths: List[Tuple[str, str]]
+        ckpt_and_performance_paths: List[Tuple[str, str, str]]
 ) -> List[Dict[str, float]]:
     """
-    Submit evaluation tasks in parallel with both checkpoint paths and velocity paths.
+    Submit evaluation tasks in parallel with checkpoint paths, eval log paths, and env names.
     """
     with concurrent.futures.ProcessPoolExecutor(
             max_workers=len(ckpt_and_performance_paths)
     ) as executor:
         futures = [
-            executor.submit(RewardFunctionEvaluation.evaluate_behavior, velocity_path)
-            for _, velocity_path in ckpt_and_performance_paths
+            executor.submit(RewardFunctionEvaluation.evaluate_behavior, eval_log_path, env_name)
+            for _, eval_log_path, env_name in ckpt_and_performance_paths
         ]
 
         fitness_dicts = [future.result() for future in futures]

@@ -378,7 +378,7 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
 
         # compute the sparse reward variant first
         goal_distance = self.data.qpos[self.door_hinge_addrs]
-        goal_achieved = True if goal_distance >= 1.35 else False
+        goal_achieved = goal_distance >= 1.35
 
         episode_summary = {
             "total_reward": float(sum(self.rewards)),
@@ -390,19 +390,18 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         with open(self.filepath4, "a") as file:
             file.write(f"Reward {reward}\n")
 
-        terminated = goal_distance > 1.35
+        terminated = goal_achieved
         truncated = self.current_step >= self.max_episode_steps and not terminated
         done = terminated or truncated
+        episode_result_line = (
+            f"Episode finished at step {self.current_step}: Success={goal_achieved}\n"
+        )
         if done and self.mode == "test":
             with open(self.filepath3, "a") as file:
-                file.write(
-                    f"Episode finished at step {self.current_step}: Success={goal_achieved}\n"
-                )
+                file.write(episode_result_line)
             # with open(self.filepath4, "a") as file:
             #     file.write(f"Episodic Reward{self.current_step}:\n")
 
-        # done = goal_distance > 1.35
-        succ = goal_distance > 1.35
         # done = self.current_step >= self.max_episode_steps
         if done:
             with open(self.filepath, "a") as file:
@@ -414,7 +413,7 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
             self.reward_components_log = {key: [] for key in reward_components.keys()}
 
             with open(self.filepath2, "a") as file:
-                file.write(f"Episode {self.current_step}: Success={succ}\n")
+                file.write(episode_result_line)
 
         if self.render_mode == "human":
             self.render()

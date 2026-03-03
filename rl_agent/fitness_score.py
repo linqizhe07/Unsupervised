@@ -1,29 +1,53 @@
+import re
+
+
+TMIN = 50
+TMAX = 400
+FITNESS_SLOPE = -1 / 700
+FITNESS_INTERCEPT = 75 / 70
+
+
+def _parse_episode_result(line):
+    success_match = re.search(r"Success=(True|False)", line)
+    if success_match is None:
+        return None
+
+    step_match = re.search(r"step\s+(\d+):", line)
+    if step_match is None:
+        step_match = re.search(r"Episode\s+(\d+):", line)
+    if step_match is None:
+        raise ValueError(f"Unable to parse steps from log line: {line.strip()}")
+
+    steps = int(step_match.group(1))
+    success = success_match.group(1) == "True"
+    return steps, success
+
+
 def calculate_fitness_score(log_file):
-    total_fitness = 0
+    total_fitness = 0.0
     num_episodes = 0
 
     with open(log_file, "r") as file:
         for line in file:
-            if "Success=True" in line:
-                # Extract the number of steps (removing the colon at the end)
-                steps = int(line.split()[4].replace(":", ""))
+            parsed = _parse_episode_result(line)
+            if parsed is None:
+                continue
 
-                # Calculate fitness score using the formula y = ax + b
-                a = -1 / 700
-                b = 75 / 70
-                fitness = a * steps + b
+            steps, success = parsed
+            if success:
+                clipped_steps = min(max(steps, TMIN), TMAX)
+                fitness = FITNESS_SLOPE * clipped_steps + FITNESS_INTERCEPT
+                fitness = min(max(fitness, 0.5), 1.0)
             else:
-                # Success=False, fitness is 0
-                fitness = 0
+                fitness = 0.0
 
             total_fitness += fitness
             num_episodes += 1
 
-    # Calculate the average fitness score
     if num_episodes > 0:
         average_fitness = total_fitness / num_episodes
     else:
-        average_fitness = 0  # No episodes were found
+        average_fitness = 0.0
 
     return average_fitness
 

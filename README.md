@@ -246,7 +246,7 @@ python main.py \
     evolution.individuals_per_generation=16 \
     database.num_islands=5 \
     database.num_gpus=0 \
-    data_paths.run=700 \
+    data_paths.run=100 \
     u2o.enabled=false \
     wandb.project=humanoid-baseline
 ```
@@ -262,7 +262,7 @@ python main.py \
     evolution.individuals_per_generation=16 \
     database.num_islands=5 \
     database.num_gpus=0 \
-    data_paths.run=146 \
+    data_paths.run=200 \
     u2o.enabled=false \
     wandb.project=adroit-baseline
 ```
