@@ -68,7 +68,7 @@ Core dependencies (installed by `pip install -e .`):
 | `stable-baselines3` | 2.3.2 | SAC training in evolution loop |
 | `hydra-core` | 1.3.2 | Config management |
 | `openai` | — | LLM reward generation |
-| `tensorboard` | 2.10.1 | Metrics logging |
+| `tensorboard` | ≥2.12.0 | Metrics logging (≥2.12 required for NumPy ≥1.24 compatibility) |
 | `h5py` | 3.10.0 | Dataset I/O |
 
 Additional (install as needed):
@@ -211,6 +211,28 @@ Outputs:
 
 ## Evolution Loop
 
+### Multi-GPU Distribution
+
+Each `TrainPolicy` worker is automatically assigned a GPU via round-robin across all available GPUs:
+
+```
+policies[0] → cuda:0
+policies[1] → cuda:1
+...
+policies[7] → cuda:7
+policies[8] → cuda:0   (wraps around)
+...
+```
+
+`database.num_gpus` controls **parallelism**, not GPU count:
+
+| Value | Behaviour |
+|-------|-----------|
+| `0` | Run all candidates in parallel (one per GPU slot, round-robin) |
+| `N` | Run at most N candidates in parallel at a time |
+
+The number of physical GPUs used is always `torch.cuda.device_count()`, regardless of `num_gpus`. On a single-GPU machine every worker uses `cuda:0` (same as before this change).
+
 ### Experiment 1: Baseline (no pretraining)
 
 **Humanoid:**
@@ -220,9 +242,9 @@ export OPENAI_API_KEY='<your openai key>'
 python main.py \
     evolution.baseline=revolve_auto \
     environment.name="HumanoidEnv" \
-    evolution.num_generations=5 \
-    evolution.individuals_per_generation=12 \
-    database.num_islands=3 \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    database.num_islands=5 \
     database.num_gpus=0 \
     data_paths.run=700 \
     u2o.enabled=false \
@@ -236,11 +258,11 @@ export OPENAI_API_KEY='<your openai key>'
 python main.py \
     evolution.baseline=revolve_auto \
     environment.name="AdroitHandDoorEnv" \
-    evolution.num_generations=5 \
-    evolution.individuals_per_generation=12 \
-    database.num_islands=3 \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    database.num_islands=5 \
     database.num_gpus=0 \
-    data_paths.run=1 \
+    data_paths.run=146 \
     u2o.enabled=false \
     wandb.project=adroit-baseline
 ```
@@ -257,11 +279,11 @@ python main.py \
     u2o.enabled=true \
     u2o.pretrained_dir=./u2o_pretrained_humanoid \
     environment.name="HumanoidEnv" \
-    evolution.num_generations=5 \
-    evolution.individuals_per_generation=12 \
-    database.num_islands=3 \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    database.num_islands=5 \
     database.num_gpus=0 \
-    data_paths.run=600 \
+    data_paths.run=182 \
     wandb.project=humanoid-u2o
 ```
 
@@ -273,11 +295,11 @@ python main.py \
     u2o.enabled=true \
     u2o.pretrained_dir=./u2o_pretrained_adroit \
     environment.name="AdroitHandDoorEnv" \
-    evolution.num_generations=5 \
-    evolution.individuals_per_generation=12 \
-    database.num_islands=3 \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    database.num_islands=5 \
     database.num_gpus=0 \
-    data_paths.run=1 \
+    data_paths.run=126 \
     wandb.project=adroit-u2o
 ```
 

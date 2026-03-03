@@ -120,8 +120,9 @@ def train(
     output_path,
     log_dir,
     wandb_cfg=None,
+    gpu_id=0,
 ):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     current_timesteps = 0
     final_checkpoint_path = os.path.join(
         model_checkpoint_path,
@@ -190,6 +191,7 @@ def run_training(
     log_dir,
     env_name="HumanoidEnv",
     wandb_cfg=None,
+    gpu_id=0,
 ):
     if env_name == "AdroitHandDoorEnv":
         from rl_agent.AdroitEnv import AdroitHandDoorEnv
@@ -230,6 +232,7 @@ def run_training(
         output_path,
         log_dir,
         wandb_cfg=wandb_cfg,
+        gpu_id=gpu_id,
     )
 
     # return velocity_filepath
@@ -251,6 +254,7 @@ def run_training_u2o(
     parent_checkpoint_path=None,
     wandb_cfg=None,
     env_name="HumanoidEnv",
+    gpu_id=0,
 ):
     """
     U2O version of run_training using SFAgent with successor features.
@@ -271,7 +275,7 @@ def run_training_u2o(
         call_reward_func_dynamically,
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_checkpoint_file, exist_ok=True)
 

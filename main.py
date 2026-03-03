@@ -5,6 +5,7 @@ import traceback
 from typing import Optional, Tuple, List, Callable
 
 import numpy as np
+import torch
 
 sys.path.append(os.environ["ROOT_PATH"])
 from rewards_database import RevolveDatabase, EurekaDatabase
@@ -300,6 +301,8 @@ def main(cfg):
 
             try:
                 # initialize RL agent policy with the generated reward function
+                _n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+                _gpu_id = len(policies) % _n_gpus
                 policy = TrainPolicy(
                     reward_func_str,
                     generation_id,
@@ -308,6 +311,7 @@ def main(cfg):
                     cfg.evolution.baseline,  # cfg.evolution.baseline
                     cfg.database.rewards_dir,
                     env_name=env_name,
+                    gpu_id=_gpu_id,
                 )
                 # Build wandb config for subprocess logging (both U2O and baseline)
                 ft_wandb_cfg = None
