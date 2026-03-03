@@ -301,6 +301,7 @@ def train_policies_in_parallel(
     multiprocessing.set_start_method("spawn", force=True)
     if max_workers is None:
         max_workers = len(policy_classes)
+    results = []
     with concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers
     ) as executor:
@@ -308,9 +309,18 @@ def train_policies_in_parallel(
             executor.submit(policy_class.train_policy)
             for policy_class in policy_classes
         ]
-        #  results = executor.map(train_model, enumerate(model_classes))
-
-        results = [future.result() for future in futures]
+        for i, future in enumerate(futures):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                logging.error(
+                    f"Training worker {i} failed (island={policy_classes[i].island_id}, "
+                    f"gen={policy_classes[i].generation_id}, "
+                    f"counter={policy_classes[i].counter_id}): {e}"
+                )
+                # Return empty paths so evaluate_policies_in_parallel scores this
+                # as INVALID_FITNESS=-1e9 via FileNotFoundError in read_values().
+                results.append((None, ""))
     return results
 
 
