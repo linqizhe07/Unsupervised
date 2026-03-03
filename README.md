@@ -1,4 +1,4 @@
-# Zero-Shot Revolve with frozen phi & z_star
+# Zero-Shot Revolve
 
 ## Overview
 
