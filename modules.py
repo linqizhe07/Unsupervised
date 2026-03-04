@@ -36,7 +36,7 @@ class RewardFunctionGeneration:
         # TODO: change system message based on Eureka
         self.system_prompt = system_prompt
         self.env_input = env_input  # env_class + task
-        self.llm = "gpt-5-2025-08-07"
+        self.llm = "claude-opus-4-5-20251101"
 
     def query_llm(self, in_context_prompt: str) -> Tuple[str, int, int]:
         response = client.chat.completions.create(
