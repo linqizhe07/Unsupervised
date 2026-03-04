@@ -265,8 +265,6 @@ def collect_random_data(
     max_episode_steps: int = 1000,
 ) -> int:
     """Collect random exploration data into replay buffer."""
-    # Detect Adroit env to capture joint_velocities/joint_forces from MuJoCo state.
-    is_adroit = hasattr(env, "data") and env.observation_space.shape[0] == 39
     total_steps = 0
     for ep in range(num_episodes):
         obs, info = env.reset()
@@ -276,10 +274,6 @@ def collect_random_data(
             action = env.action_space.sample()
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
-            extras = {}
-            if is_adroit:
-                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
-                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
@@ -287,7 +281,6 @@ def collect_random_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
-                **extras,
             )
             obs = next_obs
             step += 1
@@ -324,7 +317,6 @@ def collect_rnd_data(
 
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    is_adroit = hasattr(env, "data") and obs_dim == 39
 
     rnd = RNDNetwork(obs_dim, embedding_dim=128, hidden_dim=256).to(device)
     rnd_opt = torch.optim.Adam(rnd.predictor.parameters(), lr=rnd_lr)
@@ -382,10 +374,6 @@ def collect_rnd_data(
                     intrinsic_r = 0.0
 
             # Store env reward (0.0) in buffer, not intrinsic reward
-            extras = {}
-            if is_adroit:
-                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
-                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
@@ -393,7 +381,6 @@ def collect_rnd_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
-                **extras,
             )
 
             norm_obs_detached = norm_obs.squeeze(0).detach()
