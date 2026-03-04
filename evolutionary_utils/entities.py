@@ -129,7 +129,6 @@ class Individual:
         delete_file(self.fitness_file_path, "fitness score (.txt) file")
         delete_file(self.reward_history_path, "reward history (.json) file")
         delete_file(self.model_checkpoint_path, "model checkpoint (.zip) file")
-        delete_file(self.u2o_checkpoint_path, "U2O checkpoint (.pt) file")
 
 
 class Island:
