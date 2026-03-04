@@ -1,37 +1,63 @@
-class Env(EzPickle):
+class AdroitHandDoorEnv(MujocoEnv, EzPickle):
+    """
+    ## Description
+
+    The environment is based on the Adroit manipulation platform, a 28 degree of freedom system
+    which consists of a 24 degrees of freedom ShadowHand and a 4 degree of freedom arm.
+    The task to be completed consists on undoing the latch and swing the door open.
+    The latch has significant dry friction and a bias torque that forces the door to stay closed.
+    The position of the door is randomized. Task is considered complete when the door touches
+    the door stopper at the other end (door_hinge >= 1.35 rad).
+
     ## Action Space
 
-    The action space is a 'Box(-1.0, 1.0, (28,), float32)'. The control actions are
-    absolute angular positions of the Adroit hand joints. The input of the control
-    actions is set to a range between -1 and 1 by scaling the real actuator angle
-    ranges in radians.
+    The action space is a `Box(-1.0, 1.0, (28,), float32)`. The control actions are absolute
+    angular positions of the Adroit hand joints. The input of the control actions is set to a
+    range between -1 and 1 by scaling the real actuator angle ranges in radians.
 
     ## Observation Space
 
-    The observation space is of the type 'Box(-inf, inf, (97,), float64)'. It contains
-    information about the angular position of the finger joints, the pose of the palm
-    of the hand, as well as state of the latch and door and the joint velocities and
-    forces.
+    The observation space is of the type `Box(-inf, inf, (39,), float64)`. It contains information
+    about the angular position of the finger joints, the pose of the palm of the hand, the position
+    of the door handle, as well as state of the latch and door.
 
-    | Num | Observation | Min | Max | Joint Name (in corresponding XML file) |
-    Site Name (in corresponding XML file) | Joint Type | Unit
-    |-----|-------------|-----|-----|---------------------------------------|
-    | 0   | Angular position of the vertical arm joint
-    | -Inf | Inf | ARRx | -
-    | hinge | angle (rad) |
-    ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ...
-    ...
+    | Num | Observation                                                          | Min  | Max | Unit             |
+    |-----|----------------------------------------------------------------------|------|-----|------------------|
+    | 0-26  | Angular positions of 27 hand joints (arm + wrist + fingers)       | -Inf | Inf | angle (rad)      |
+    | 27    | Angular position of the door latch                                | -Inf | Inf | angle (rad)      |
+    | 28    | Angular position of the door hinge                                | -Inf | Inf | angle (rad)      |
+    | 29-31 | Position of the center of the palm (x, y, z)                      | -Inf | Inf | position (m)     |
+    | 32-34 | Position of the door handle (x, y, z)                             | -Inf | Inf | position (m)     |
+    | 35-37 | Positional difference from palm to door handle (x, y, z)          | -Inf | Inf | position (m)     |
+    | 38    | Door open indicator (1.0 if open, -1.0 if closed)                 | -1   | 1   | binary           |
+
+    ## Available Reward Function Variables
+
+    The following named variables are available as input arguments to `compute_reward`.
+    You must ONLY use these variable names as function parameters:
+
+    - `hand_qpos`: np.ndarray of shape (27,) - angular positions of all hand joints (rad)
+    - `latch_pos`: float - angular position of the door latch (rad)
+    - `door_pos`: float - angular position of the door hinge (rad). Door is open when >= 1.35
+    - `door_hinge`: float - same as door_pos
+    - `palm_pos`: np.ndarray of shape (3,) - xyz position of the center of the palm (m)
+    - `handle_pos`: np.ndarray of shape (3,) - xyz position of the door handle (m)
+    - `palm_handle_delta`: np.ndarray of shape (3,) - vector from handle to palm: palm_pos - handle_pos (m)
+    - `door_open`: float - 1.0 if the door is open (hinge > 1.0 rad), -1.0 otherwise
+    - `action`: np.ndarray of shape (28,) - control actions applied at the current step
+    - `joint_velocities`: np.ndarray of shape (30,) - angular velocities of all joints (rad/s)
+    - `joint_forces`: np.ndarray of shape (28,) - forces/torques applied by each actuator
+
+    ## Episode End
+
+    The episode ends when the door hinge angle >= 1.35 radians (success) or after 400 timesteps.
+    """
 
     def _get_obs(self):
-        # qpos for hand
-        # xpos for obj
-        # xpos for target
         qpos = self.data.qpos.ravel()
         handle_pos = self.data.site_xpos[self.handle_site_id].ravel()
         palm_pos = self.data.site_xpos[self.grasp_site_id].ravel()
         door_pos = np.array([self.data.qpos[self.door_hinge_addrs]])
-        joint_velocities = self.data.qvel.ravel()
-        joint_forces = self.data.actuator_force.ravel()
         if door_pos > 1.0:
             door_open = 1.0
         else:
@@ -44,7 +70,8 @@ class Env(EzPickle):
                 [latch_pos],
                 door_pos,
                 palm_pos,
+                handle_pos,
                 palm_pos - handle_pos,
-                [door_open]
+                [door_open],
             ]
         )

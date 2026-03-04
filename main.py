@@ -288,6 +288,9 @@ def main(cfg):
                 operator = (
                     f"{operator}_auto" if "auto" in cfg.evolution.baseline else operator
                 )
+                # Use Adroit-specific mutation/crossover prompts when available
+                if env_name == "AdroitHandDoorEnv" and f"{operator}_adroit" in prompts.types:
+                    operator = f"{operator}_adroit"
                 operator_prompt = prompts.types[operator]
 
             # each sample in 'in_context_samples' is a tuple of (fn_path: str, fitness_score: float)
