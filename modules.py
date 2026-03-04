@@ -27,7 +27,7 @@ from utils import parse_llm_output, serialize_dict, format_human_feedback
 openai_api_key = os.environ["OPENAI_API_KEY"]
 client = OpenAI(
     api_key=openai_api_key,
-    base_url = "https://api.viviai.cc/v1")
+    base_url = "https://api.viviai.cc/v1/messages")
 
 
 # generates reward functions
