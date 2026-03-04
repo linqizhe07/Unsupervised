@@ -119,7 +119,7 @@ class RewardFunctionGeneration:
                 parsed_function_str = parse_llm_output(raw_llm_output)
                 break
             # except openai.RateLimitError or openai.APIError or openai.Timeout:
-            except openai.RateLimitError or openai.APIError or openai.Timeout:
+            except (openai.RateLimitError, openai.APIError, openai.Timeout):
                 time.sleep(10)
                 continue
         # parsed_function_str = open("test_heuristic", "r").read()
