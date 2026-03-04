@@ -317,9 +317,8 @@ class Island:
         remove all except best individual
         """
         fittest_individual = self.fittest_individual
-        # TODO: handle case where more than one are equally fit
         for individual in self.individuals:
-            if individual.fitness_score == fittest_individual.fitness_score:
+            if individual is fittest_individual:
                 continue
             individual.remove_files()
         self.individuals = [fittest_individual]

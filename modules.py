@@ -40,23 +40,29 @@ class RewardFunctionGeneration:
 
     def query_llm(self, in_context_prompt: str) -> Tuple[str, int, int]:
         response = client.chat.completions.create(
-            model=self.llm,  # gpt-4-1106-preview, gpt-3.5-turbo-1106
+            model=self.llm,
             messages=[
                 {
                     "role": "system",
                     "content": self.system_prompt + "\n" + self.env_input,
                 },
-                {"role": "user", "content": f"{in_context_prompt}"},
+                {"role": "user", "content": in_context_prompt},
             ],
+            max_completion_tokens=4096,
+            reasoning_effort="none",
             temperature=1,
-            max_tokens=4096,
             top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0,
         )
 
+        content = response.choices[0].message.content
+        if content is None:
+            raise openai.APIError(
+                message="Model returned empty content (possibly truncated or refused)",
+                request=None,
+                body=None,
+            )
         return (
-            response.choices[0].message.content,
+            content,
             response.usage.prompt_tokens,
             response.usage.completion_tokens,
         )
@@ -81,7 +87,8 @@ class RewardFunctionGeneration:
                 continue
 
             in_context_samples_str += "\n\n```python\n"
-            in_context_samples_str += open(filename, "r").read()
+            with open(filename, "r") as f:
+                in_context_samples_str += f.read()
             in_context_samples_str += "\n```\n"
 
             reward_history = []
@@ -111,19 +118,21 @@ class RewardFunctionGeneration:
         operator_prompt = operator_prompt.replace("<EPISODES>", "100")
         return operator_prompt
 
-    def generate_rf(self, in_context_prompt: str) -> str:
-        parsed_function_str = None
-        while True:
+    def generate_rf(self, in_context_prompt: str, max_retries: int = 30) -> str:
+        for attempt in range(max_retries):
             try:
                 raw_llm_output, _, _ = self.query_llm(in_context_prompt)
                 parsed_function_str = parse_llm_output(raw_llm_output)
-                break
-            # except openai.RateLimitError or openai.APIError or openai.Timeout:
-            except (openai.RateLimitError, openai.APIError, openai.Timeout):
-                time.sleep(10)
+                return parsed_function_str
+            except (openai.RateLimitError, openai.APIError, openai.APITimeoutError) as e:
+                logging.info(f"API error (attempt {attempt+1}/{max_retries}): {e}")
+                time.sleep(min(10 * (2 ** min(attempt, 4)), 160))  # exponential backoff, cap at 160s
                 continue
-        # parsed_function_str = open("test_heuristic", "r").read()
-        return parsed_function_str
+        raise openai.APIError(
+            message=f"Failed after {max_retries} retries",
+            request=None,
+            body=None,
+        )
 
 
 class TrainPolicy:

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 sys.path.append(os.environ["ROOT_PATH"])
-from rewards_database import RevolveDatabase, EurekaDatabase
+from rewards_database import RevolveDatabase
 from modules import *
 import utils
 import prompts
@@ -230,24 +230,15 @@ def main(cfg):
         final_temp=cfg.database.final_temp,
         num_iterations=cfg.evolution.num_generations,
     )
-    if "revolve" in cfg.evolution.baseline:
-        database = partial(
-            RevolveDatabase,
-            num_islands=cfg.database.num_islands,
-            max_size=cfg.database.max_island_size,
-            crossover_prob=cfg.database.crossover_prob,
-            migration_prob=cfg.database.migration_prob,
-            reward_fn_dir=cfg.database.rewards_dir,
-            baseline=cfg.evolution.baseline,
-        )
-    else:
-        database = partial(
-            EurekaDatabase,
-            num_islands=1,  # Eureka for a single island
-            max_size=cfg.database.max_island_size,
-            reward_fn_dir=cfg.database.rewards_dir,
-            baseline=cfg.evolution.baseline,
-        )
+    database = partial(
+        RevolveDatabase,
+        num_islands=cfg.database.num_islands,
+        max_size=cfg.database.max_island_size,
+        crossover_prob=cfg.database.crossover_prob,
+        migration_prob=cfg.database.migration_prob,
+        reward_fn_dir=cfg.database.rewards_dir,
+        baseline=cfg.evolution.baseline,
+    )
 
     _individual_idx = 0  # monotonically increasing index across all generations
     for generation_id in range(0, cfg.evolution.num_generations):

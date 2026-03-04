@@ -201,6 +201,8 @@ class RevolveDatabase:
         reset_islands_ids = indices_sorted_by_score[:num_islands_to_reset]
         keep_islands_ids = indices_sorted_by_score[num_islands_to_reset:]
         for reset_island_id in reset_islands_ids:
+            if self._islands[reset_island_id].size == 0:
+                continue
             # delete associated files while retaining only the fittest
             self._islands[reset_island_id].only_keep_best()
             # founder island to migrate to the empty island with
@@ -335,74 +337,3 @@ class RevolveDatabase:
             logging.info(f"{filetype} does not exist in {filepath}.")
 
 
-class EurekaDatabase:
-    def __init__(
-        self,
-        num_islands,
-        max_size,
-        load_islands: bool,
-        reward_fn_dir: str,
-        baseline: str,
-    ):
-        assert num_islands == 1, "Eureka baseline is only for single island."
-
-        self.reward_fn_dir = reward_fn_dir
-        self.baseline = baseline
-
-        self._islands: List[Island] = []
-        if load_islands:
-            # for it > 0, load stored islands
-            self._islands = [Island.load_island(self.reward_fn_dir, self.baseline, 0)]
-        else:
-            # Initialize empty islands.
-            self._islands = [
-                Island(0, [], [], [], [], [], self.reward_fn_dir, self.baseline)
-            ]
-
-    def add_individuals_to_islands(
-        self,
-        generation_ids: List[int],
-        counter_ids: List[int],
-        rew_fn_strings: List[str],
-        fitness_scores: List[float],
-        metrics_dicts: List[dict],
-        island_ids: List[int],
-    ):
-        """
-        For Eureka, we only retain all individuals to maintain consistency with REvolve.
-        For sampling in the next generation, only the best individual from all previous generations is used.
-        """
-        for (
-            generation_id,
-            counter_id,
-            rew_fn_string,
-            fitness_score,
-            island_id,
-            metrics_dict,
-        ) in zip(
-            generation_ids,
-            counter_ids,
-            rew_fn_strings,
-            fitness_scores,
-            island_ids,
-            metrics_dicts,
-        ):
-            logging.info(
-                f"Accessing _islands[{island_id}] in seed_islands; type={type(island_id)}"
-            )
-
-            self._islands[0].register_individual_in_island(
-                generation_id,
-                counter_id,
-                rew_fn_string,
-                fitness_score,
-                metrics_dict,
-            )
-
-    def sample_in_context(self) -> Tuple[List[Tuple[str, float]], int, str]:
-        in_context_samples = []
-        fittest_individual = self._islands[0].fittest_individual
-        in_context_samples.append(
-            (fittest_individual.fn_file_path, fittest_individual.fitness_score)
-        )
-        return in_context_samples, 0, "mutation"
