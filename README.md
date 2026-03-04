@@ -48,9 +48,10 @@ pip install -e .
 ```
 
 ```shell for instance
-python3 -m venv venv1(1 for Adroithand 2 for Humanoid)
+python3 -m venv venv1(2 for Adroithand 1 for Humanoid)
 source venv/bin/activate
 pip install -e .
+pip install "tensorboard>=2.12.0"
 ```
 
 ### Required Packages
@@ -74,8 +75,6 @@ Core dependencies (installed by `pip install -e .`):
 Additional (install as needed):
 
 ```shell
-# AdroitHand pretraining: D4RL offline datasets
-pip install git+https://github.com/Farama-Foundation/d4rl.git
 
 # Experiment tracking (optional)
 pip install wandb
@@ -164,6 +163,9 @@ Sampling:       uniform over all episodes — each dataset contributes proportio
 > **Why not equal allocation?** `door-human-v1` has only ~25 episodes. Capping cloned at `max_buffer_episodes / 3 = 3333` to "balance" it would waste 3308 buffer slots and reduce cloned's state-coverage contribution without meaningfully increasing human's share (it would still be < 1 % of training batches).
 
 ```shell
+# h5py contains C extensions compiled against a specific numpy ABI.
+# If you see "numpy.dtype size changed, may indicate binary incompatibility",
+# reinstall h5py so it is compiled against the currently installed numpy:
 pip uninstall h5py -y && pip install h5py
 export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 python -m u2o.pretrain \

@@ -157,8 +157,8 @@ def train(
             CustomSACPolicy, env, verbose=1, device=device, tensorboard_log=log_dir
         )
 
-    TIMESTEPS = 250
-    total_timesteps = 500
+    TIMESTEPS = 5000
+    total_timesteps = 500000
 
     while current_timesteps < total_timesteps:
         model.learn(
