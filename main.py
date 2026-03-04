@@ -45,16 +45,26 @@ def _build_validation_env_state(env_name: str):
     if env_name == "AdroitHandDoorEnv":
         obs = np.zeros(39, dtype=np.float32)
         action = np.zeros(28, dtype=np.float32)
+        # Must match AdroitEnv.step() which passes joint_velocities/joint_forces
+        # to CustomEnvironment.update_state(), so LLM-generated reward functions
+        # that reference these variables pass validation.
+        return build_env_state_from_transition(
+            obs=obs,
+            action=action,
+            next_obs=obs,
+            reward_on="next",
+            joint_velocities=np.zeros(30, dtype=np.float32),
+            joint_forces=np.zeros(28, dtype=np.float32),
+        )
     else:
         obs = np.zeros(376, dtype=np.float32)
         action = np.zeros(17, dtype=np.float32)
-
-    return build_env_state_from_transition(
-        obs=obs,
-        action=action,
-        next_obs=obs,
-        reward_on="next",
-    )
+        return build_env_state_from_transition(
+            obs=obs,
+            action=action,
+            next_obs=obs,
+            reward_on="next",
+        )
 
 
 def is_valid_reward_fn(
