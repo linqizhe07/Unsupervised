@@ -45,21 +45,15 @@ def _build_validation_env_state(env_name: str):
     if env_name == "AdroitHandDoorEnv":
         obs = np.zeros(39, dtype=np.float32)
         action = np.zeros(28, dtype=np.float32)
-        joint_velocities = np.zeros(30, dtype=np.float32)
-        joint_forces = np.zeros(28, dtype=np.float32)
     else:
         obs = np.zeros(376, dtype=np.float32)
         action = np.zeros(17, dtype=np.float32)
-        joint_velocities = None
-        joint_forces = None
 
     return build_env_state_from_transition(
         obs=obs,
         action=action,
         next_obs=obs,
         reward_on="next",
-        joint_velocities=joint_velocities,
-        joint_forces=joint_forces,
     )
 
 

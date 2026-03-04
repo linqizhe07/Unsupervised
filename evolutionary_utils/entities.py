@@ -5,6 +5,7 @@ Evolutionary Utilities
 import glob
 import json
 import os
+import shutil
 import sys
 from typing import List, Optional
 
@@ -339,3 +340,12 @@ class Island:
             founder_individual.fitness_score,
             founder_individual.metrics_dict,
         )
+
+        # Copy U2O checkpoint from founder island to new island so that
+        # parent checkpoint inheritance works after migration.
+        src_ckpt = founder_individual.u2o_checkpoint_path
+        if os.path.exists(src_ckpt):
+            new_individual = self.individuals[-1]
+            dst_ckpt = new_individual.u2o_checkpoint_path
+            os.makedirs(os.path.dirname(dst_ckpt), exist_ok=True)
+            shutil.copy2(src_ckpt, dst_ckpt)

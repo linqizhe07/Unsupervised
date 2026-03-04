@@ -42,8 +42,6 @@ The system combines three components:
 ```shell for running locally
 git clone https://github.com/Linqizhe07/zeroshotRevolve.git
 cd zeroshotRevolve
-conda create -n revolve python=3.10
-conda activate revolve
 pip install -e .
 # Install CUDA-enabled PyTorch (override the CPU-only version from pip install -e .)
 pip install torch --index-url https://download.pytorch.org/whl/cu124
