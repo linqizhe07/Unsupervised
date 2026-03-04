@@ -199,6 +199,13 @@ def load_d4rl_data(
     # (i = n-1) has no valid next_obs so we stop at n-1 in that case.
     n_iter = n if next_obs_data is not None else n - 1
 
+    # For Adroit (39-dim obs), approximate joint_velocities via finite difference.
+    # obs layout: qpos[1:-2](27), latch(1), door_hinge(1), palm(3), handle(3), delta(3), door_open(1)
+    # qvel layout: 30 dims matching qpos (slide + 27 hand + latch + door_hinge)
+    is_adroit = expected_obs_dim == 39
+    # Adroit frame_skip=5, MuJoCo default timestep=0.002 → dt=0.01
+    adroit_dt = 0.01
+
     for i in range(n_iter):
         done = bool(terminals[i])
         timeout = bool(timeouts[i]) if timeouts is not None else (
@@ -206,6 +213,18 @@ def load_d4rl_data(
         )
         next_obs = next_obs_data[i] if next_obs_data is not None else observations[i + 1]
         episode_done = done or timeout
+
+        extras = {}
+        if is_adroit:
+            # Approximate joint velocities from consecutive observations.
+            # Recovers 29/30 DOF; qvel[0] (ARTz slide) is not in obs.
+            approx_vel = np.zeros(30, dtype=np.float32)
+            approx_vel[1:28] = (next_obs[:27] - observations[i][:27]) / adroit_dt
+            approx_vel[28] = (next_obs[28] - observations[i][28]) / adroit_dt  # door hinge
+            approx_vel[29] = (next_obs[27] - observations[i][27]) / adroit_dt  # latch
+            extras["joint_velocities"] = approx_vel
+            extras["joint_forces"] = np.zeros(28, dtype=np.float32)
+
         # Bug fix: timeout is NOT a true terminal — use discount=1.0 for timeouts so
         # the bootstrapped TD target is not incorrectly zeroed out.
         replay_buffer.add_transition(
@@ -215,6 +234,7 @@ def load_d4rl_data(
             next_obs=next_obs,
             done=episode_done,
             discount=0.0 if done else 1.0,
+            **extras,
         )
         total_steps += 1
 
@@ -245,6 +265,8 @@ def collect_random_data(
     max_episode_steps: int = 1000,
 ) -> int:
     """Collect random exploration data into replay buffer."""
+    # Detect Adroit env to capture joint_velocities/joint_forces from MuJoCo state.
+    is_adroit = hasattr(env, "data") and env.observation_space.shape[0] == 39
     total_steps = 0
     for ep in range(num_episodes):
         obs, info = env.reset()
@@ -254,6 +276,10 @@ def collect_random_data(
             action = env.action_space.sample()
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            extras = {}
+            if is_adroit:
+                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
+                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
@@ -261,6 +287,7 @@ def collect_random_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
+                **extras,
             )
             obs = next_obs
             step += 1
@@ -297,6 +324,7 @@ def collect_rnd_data(
 
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
+    is_adroit = hasattr(env, "data") and obs_dim == 39
 
     rnd = RNDNetwork(obs_dim, embedding_dim=128, hidden_dim=256).to(device)
     rnd_opt = torch.optim.Adam(rnd.predictor.parameters(), lr=rnd_lr)
@@ -354,6 +382,10 @@ def collect_rnd_data(
                     intrinsic_r = 0.0
 
             # Store env reward (0.0) in buffer, not intrinsic reward
+            extras = {}
+            if is_adroit:
+                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
+                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
@@ -361,6 +393,7 @@ def collect_rnd_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
+                **extras,
             )
 
             norm_obs_detached = norm_obs.squeeze(0).detach()

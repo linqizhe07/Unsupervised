@@ -87,8 +87,13 @@ class ReplayBuffer:
         next_obs: np.ndarray,
         done: bool,
         discount: float = 1.0,
+        **extras: np.ndarray,
     ) -> None:
-        """Add a single transition. Starts new episode on first call or after done."""
+        """Add a single transition. Starts new episode on first call or after done.
+
+        Extra keyword arguments (e.g. joint_velocities, joint_forces) are stored
+        alongside the core fields and persisted through save/load automatically.
+        """
         self._current_episode["observation"].append(np.array(obs, dtype=np.float32))
         self._current_episode["action"].append(np.array(action, dtype=np.float32))
         self._current_episode["reward"].append(
@@ -100,6 +105,8 @@ class ReplayBuffer:
         self._current_episode["next_observation"].append(
             np.array(next_obs, dtype=np.float32)
         )
+        for key, value in extras.items():
+            self._current_episode[key].append(np.array(value, dtype=np.float32))
 
         if done:
             self._store_episode()
@@ -236,22 +243,37 @@ class ReplayBuffer:
         self._is_fixed_episode_length = (lengths.min() == lengths.max()) if len(lengths) > 0 else True
         logger.info(f"Loaded replay buffer from {path} ({len(self)} episodes, {self.num_transitions} transitions)")
 
+    @property
+    def extra_fields(self) -> tp.List[str]:
+        """Return names of non-core fields stored in the buffer."""
+        core = {"observation", "action", "reward", "discount", "next_observation"}
+        return [k for k in self._storage if k not in core]
+
     def relabel_rewards(self, reward_fn: tp.Callable) -> None:
         """Recompute rewards using a new reward function.
 
-        reward_fn: callable(obs, action, next_obs) -> float
-        The caller decides reward timing semantics (e.g. reward on next_obs).
+        reward_fn: callable(obs, action, next_obs, **extras) -> float
+        Extra fields stored in the buffer (e.g. joint_velocities, joint_forces)
+        are passed as keyword arguments if available.
         """
+        extra_names = self.extra_fields
         n_eps = len(self)
         for ep_idx in range(n_eps):
             ep_len = self._episodes_length[ep_idx]
-            # Slice out the full episode arrays at once to avoid per-step indexing overhead.
             obs_ep = self._storage["observation"][ep_idx, :ep_len]
             action_ep = self._storage["action"][ep_idx, :ep_len]
             next_obs_ep = self._storage["next_observation"][ep_idx, :ep_len]
+            extra_eps = {
+                name: self._storage[name][ep_idx, :ep_len]
+                for name in extra_names
+            }
             rewards = np.empty((ep_len, 1), dtype=np.float32)
             for step_idx in range(ep_len):
+                step_extras = {
+                    name: extra_eps[name][step_idx] for name in extra_names
+                }
                 rewards[step_idx, 0] = reward_fn(
-                    obs_ep[step_idx], action_ep[step_idx], next_obs_ep[step_idx]
+                    obs_ep[step_idx], action_ep[step_idx], next_obs_ep[step_idx],
+                    **step_extras,
                 )
             self._storage["reward"][ep_idx, :ep_len] = rewards

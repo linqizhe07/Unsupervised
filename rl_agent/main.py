@@ -386,6 +386,12 @@ def run_training_u2o(
     obs_np = batch.obs.cpu().numpy()
     action_np = batch.action.cpu().numpy()
     next_obs_np = batch.next_obs.cpu().numpy()
+    # Fallback zeros for z* inference (batch.sample() doesn't return extras).
+    # The more accurate per-transition extras are used in relabel_rewards below.
+    _z_extra_kw = {}
+    if env_name == "AdroitHandDoorEnv":
+        _z_extra_kw["joint_velocities"] = np.zeros(30, dtype=np.float32)
+        _z_extra_kw["joint_forces"] = np.zeros(28, dtype=np.float32)
     reward_failures = 0
     for i in range(obs_np.shape[0]):
         try:
@@ -394,6 +400,7 @@ def run_training_u2o(
                 action=action_np[i],
                 next_obs=next_obs_np[i],
                 reward_on="next",
+                **_z_extra_kw,
             )
             r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
             task_rewards.append(float(r))
@@ -426,13 +433,14 @@ def run_training_u2o(
     print(f"[U2O] Relabeling offline buffer ({offline_buffer.num_transitions} transitions) with task reward...")
     relabel_failures = {"count": 0}
 
-    def _task_reward_fn(obs, action, next_obs):
+    def _task_reward_fn(obs, action, next_obs, **extras):
         try:
             env_state = build_env_state_from_transition(
                 obs=obs,
                 action=action,
                 next_obs=next_obs,
                 reward_on="next",
+                **extras,
             )
             r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
             return float(r)

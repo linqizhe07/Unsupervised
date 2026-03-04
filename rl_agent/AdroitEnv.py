@@ -359,6 +359,7 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
     def step(self, a):
         a = np.clip(a, -1.0, 1.0)
         self.current_step += 1  # Increment step counter
+        action = a.copy()  # save clipped action before scaling
 
         a = self.act_mean + a * self.act_rng  # mean center and scale
 
@@ -366,7 +367,7 @@ class AdroitHandDoorEnv(MujocoEnv, EzPickle):
         obs = self._get_obs()
         joint_velocities = self.data.qvel.ravel()
         joint_forces = self.data.actuator_force.ravel()
-        self.custom_env.update_state(obs, joint_velocities, joint_forces)
+        self.custom_env.update_state(obs, joint_velocities, joint_forces, action=action)
         reward, reward_components = call_reward_func_dynamically(
             self.reward_func, self.custom_env.env_state
         )
