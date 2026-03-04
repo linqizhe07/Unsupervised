@@ -27,7 +27,7 @@ from utils import parse_llm_output, serialize_dict, format_human_feedback
 openai_api_key = os.environ["OPENAI_API_KEY"]
 client = OpenAI(
     api_key=openai_api_key,
-    base_url = "https://api.viviai.cc/v1/messages")
+    base_url = "https://api.openai.com/v1")
 
 
 # generates reward functions
@@ -36,7 +36,7 @@ class RewardFunctionGeneration:
         # TODO: change system message based on Eureka
         self.system_prompt = system_prompt
         self.env_input = env_input  # env_class + task
-        self.llm = "claude-opus-4-5-20251101"
+        self.llm = "gpt-4o"
 
     def query_llm(self, in_context_prompt: str) -> Tuple[str, int, int]:
         response = client.chat.completions.create(
@@ -51,6 +51,8 @@ class RewardFunctionGeneration:
             temperature=1,
             max_tokens=4096,
             top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0,
         )
 
         return (
