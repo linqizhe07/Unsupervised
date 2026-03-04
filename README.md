@@ -45,13 +45,19 @@ cd zeroshotRevolve
 conda create -n revolve python=3.10
 conda activate revolve
 pip install -e .
+# Install CUDA-enabled PyTorch (override the CPU-only version from pip install -e .)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
-```shell for instance
-python3 -m venv venv1(2 for Adroithand 1 for Humanoid)
-source venv/bin/activate
+```shell for instance (e.g. Lambda Labs)
+python3 -m venv venv1  # venv2 for AdroitHand, venv1 for Humanoid
+source venv1/bin/activate
 pip install -e .
+# Install CUDA-enabled PyTorch (override the CPU-only version from pip install -e .)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 pip install "tensorboard>=2.12.0"
+# Verify GPU is available
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
 
 ### Required Packages
