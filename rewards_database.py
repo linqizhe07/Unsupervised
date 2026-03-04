@@ -164,11 +164,18 @@ class RevolveDatabase:
                     f"{self.reward_fn_dir}/island_{island_id}/model_checkpoints/"
                     f"{generation_id}_{counter_id}.zip"
                 )
+                u2o_checkpoint_path = (
+                    f"{self.reward_fn_dir}/island_{island_id}/model_checkpoints/"
+                    f"u2o_final_{generation_id}_{counter_id}.pt"
+                )
                 RevolveDatabase.delete_file(
                     reward_history_path, "reward history (.json) file"
                 )
                 RevolveDatabase.delete_file(
                     model_checkpoint_path, "model checkpoint (.zip) file"
+                )
+                RevolveDatabase.delete_file(
+                    u2o_checkpoint_path, "U2O checkpoint (.pt) file"
                 )
 
             # if island size exceeds max size, discard individual with the lowest score
