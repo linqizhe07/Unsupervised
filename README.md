@@ -244,7 +244,7 @@ python main.py \
     environment.name="HumanoidEnv" \
     evolution.num_generations=7 \
     evolution.individuals_per_generation=16 \
-    database.num_islands=5 \
+    database.num_islands=13 \
     database.num_gpus=0 \
     data_paths.run=100 \
     u2o.enabled=false \
@@ -260,9 +260,9 @@ python main.py \
     environment.name="AdroitHandDoorEnv" \
     evolution.num_generations=7 \
     evolution.individuals_per_generation=16 \
-    database.num_islands=5 \
+    database.num_islands=13 \
     database.num_gpus=0 \
-    data_paths.run=200 \
+    data_paths.run=213 \
     u2o.enabled=false \
     wandb.project=adroit-baseline
 ```
@@ -281,7 +281,7 @@ python main.py \
     environment.name="HumanoidEnv" \
     evolution.num_generations=7 \
     evolution.individuals_per_generation=16 \
-    database.num_islands=5 \
+    database.num_islands=13 \
     database.num_gpus=0 \
     data_paths.run=182 \
     wandb.project=humanoid-u2o
@@ -297,7 +297,7 @@ python main.py \
     environment.name="AdroitHandDoorEnv" \
     evolution.num_generations=7 \
     evolution.individuals_per_generation=16 \
-    database.num_islands=5 \
+    database.num_islands=13 \
     database.num_gpus=0 \
     data_paths.run=126 \
     wandb.project=adroit-u2o

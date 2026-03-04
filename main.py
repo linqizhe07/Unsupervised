@@ -180,6 +180,19 @@ def main(cfg):
                 },
             )
             print(f"[wandb] Initialized: {wandb_run.url}")
+            # Clear wandb env vars so spawned training subprocesses don't
+            # inherit WANDB_RUN_ID and accidentally finish this evolution run
+            # via reinit="finish_previous".
+            import os as _os
+            for _key in ["WANDB_RUN_ID", "WANDB_RESUME", "WANDB_NAME", "WANDB_RUN_GROUP"]:
+                _os.environ.pop(_key, None)
+            # Declare per-metric x-axes so individual/* and gen/* charts
+            # use their own step dimensions rather than wandb's global step.
+            wandb.define_metric("individual_idx")
+            wandb.define_metric("individual/*", step_metric="individual_idx")
+            wandb.define_metric("gen/*", step_metric="generation")
+            wandb.define_metric("global/*", step_metric="generation")
+            wandb.define_metric("island_*", step_metric="generation")
         except ImportError:
             logging.warning("wandb not installed; disabling wandb logging.")
             wandb_run = None
@@ -236,6 +249,7 @@ def main(cfg):
             baseline=cfg.evolution.baseline,
         )
 
+    _individual_idx = 0  # monotonically increasing index across all generations
     for generation_id in range(0, cfg.evolution.num_generations):
         # fix the temperature for sampling
         temperature = temp_scheduler(iteration=generation_id)
@@ -364,19 +378,67 @@ def main(cfg):
         # if no valid reward fn
         if len(policies) == 0:
             logging.info("No valid reward functions. Hence, no policy trains required.")
+            if wandb_run is not None:
+                wandb_run.log({
+                    "generation": generation_id,
+                    "temperature": temperature,
+                    "gen/num_individuals": 0,
+                    "gen/mean_fitness": 0.0,
+                    "gen/max_fitness": 0.0,
+                    "gen/min_fitness": 0.0,
+                    "gen/std_fitness": 0.0,
+                })
             continue
+
         # train policies in parallel (num_gpus=0 means all at once)
         num_gpus = cfg.database.get("num_gpus", 1)
         max_parallel = len(policies) if num_gpus == 0 else num_gpus
         logging.info(f"Training {len(policies)} policies ({max_parallel} at a time).")
-        ckpt_and_performance_paths = train_policies_in_parallel(policies, max_workers=max_parallel)
-        logging.info("Policy training finished.")
 
-        # evaluate performance for generated reward functions
-        logging.info("Evaluating trained policies in parallel.")
-        metrics_dicts = evaluate_policies_in_parallel(ckpt_and_performance_paths)
-        fitness_scores = [metric_dict["fitness"] for metric_dict in metrics_dicts]
-        logging.info("Evaluation finished.")
+        # Use as_completed so each individual is evaluated and logged to wandb
+        # as soon as its training subprocess finishes, rather than waiting for
+        # the full generation barrier before writing any metrics.
+        import concurrent.futures as _cf
+        import multiprocessing as _mp
+        _mp.set_start_method("spawn", force=True)
+        _results_map: dict = {}  # idx -> (train_result, metrics_dict)
+        with _cf.ProcessPoolExecutor(max_workers=max_parallel) as _executor:
+            _future_to_idx = {
+                _executor.submit(policy.train_policy): i
+                for i, policy in enumerate(policies)
+            }
+            for _future in _cf.as_completed(_future_to_idx):
+                _i = _future_to_idx[_future]
+                _policy = policies[_i]
+                try:
+                    _train_result = _future.result()
+                except Exception as _e:
+                    logging.error(
+                        f"Training worker {_i} failed (island={_policy.island_id}, "
+                        f"gen={_policy.generation_id}, counter={_policy.counter_id}): {_e}"
+                    )
+                    _train_result = (None, "", _policy.env_name)
+                _, _eval_log_path, _env_name_i = _train_result
+                _metrics = RewardFunctionEvaluation.evaluate_behavior(_eval_log_path, _env_name_i)
+                _results_map[_i] = (_train_result, _metrics)
+                logging.info(
+                    f"[gen={_policy.generation_id} c={_policy.counter_id} "
+                    f"island={_policy.island_id}] fitness={_metrics['fitness']:.4f} "
+                    f"({len(_results_map)}/{len(policies)} done)"
+                )
+                if wandb_run is not None:
+                    wandb_run.log({
+                        "individual_idx": _individual_idx,
+                        "individual/fitness": float(_metrics["fitness"]),
+                        "individual/island": float(_policy.island_id),
+                        "individual/generation": float(_policy.generation_id),
+                    })
+                _individual_idx += 1
+
+        ckpt_and_performance_paths = [_results_map[i][0] for i in range(len(policies))]
+        metrics_dicts = [_results_map[i][1] for i in range(len(policies))]
+        fitness_scores = [m["fitness"] for m in metrics_dicts]
+        logging.info("Training and evaluation finished.")
 
         # store individuals only if it improves overall island fitness
         # for initialization, we don't use this step
@@ -448,7 +510,7 @@ def main(cfg):
             for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
                 log_dict[f"individuals/g{generation_id}_c{cid}_island{iid}_fitness"] = float(fit)
 
-            wandb_run.log(log_dict, step=generation_id + 1)
+            wandb_run.log(log_dict)
 
             # update lineage table
             if lineage_table is not None:
@@ -467,7 +529,7 @@ def main(cfg):
                 wandb_run.log({"lineage": _wandb2.Table(
                     columns=lineage_table.columns,
                     data=lineage_table.data,
-                )}, step=generation_id + 1)
+                )})
 
     if wandb_run is not None:
         wandb_run.finish()
