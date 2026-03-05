@@ -422,11 +422,11 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
     @property
     def terminated(self):
-        terminated = (not self.is_healthy) if self._terminate_when_unhealthy else False
-        if self.total_steps >= 1000:
-            terminated = True
-            self.total_steps = 0
-        return terminated
+        return (not self.is_healthy) if self._terminate_when_unhealthy else False
+
+    @property
+    def truncated(self):
+        return self.total_steps >= 1000
 
     def _get_obs(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -481,6 +481,8 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
             self.reward_components_log[key].append(value)
 
         terminated = self.terminated
+        truncated = self.truncated
+        done = terminated or truncated
 
         info = {
             "reward_components": reward_components,
@@ -490,7 +492,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
             "x_velocity": x_velocity,
             "y_velocity": y_velocity,
         }
-        if terminated:
+        if done:
             info["episode"] = {
                 "r": sum(self.rewards),
                 "l": len(self.rewards),
@@ -516,7 +518,7 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
         if self.render_mode == "human":
             self.render()
-        return observation, reward, terminated, False, info
+        return observation, reward, terminated, truncated, info
 
     def reset_model(self):
         # self.step=0

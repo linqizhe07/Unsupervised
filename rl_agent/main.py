@@ -374,33 +374,41 @@ def run_training_u2o(
     offline_buffer.load(buffer_path)
     print(f"[U2O] Loaded offline buffer ({len(offline_buffer)} episodes)")
 
-    # Infer z* from task reward using least-squares on phi
+    # Infer z* from task reward using least-squares on phi.
+    # Sample directly from buffer storage so we can access per-transition
+    # extras (joint_velocities, joint_forces) for accurate reward evaluation.
     reward_func_obj, _ = define_function_from_string(reward_func)
     sample_size = min(cfg.batch_size * 4, offline_buffer.num_transitions)
-    batch = offline_buffer.sample(sample_size)
-    batch = batch.to(str(device))
+
+    n_eps = len(offline_buffer)
+    ep_idx = np.random.randint(0, n_eps, size=sample_size)
+    eps_lengths = offline_buffer._episodes_length[ep_idx]
+    step_idx = (np.random.rand(sample_size) * eps_lengths).astype(np.int32)
+
+    obs_np = offline_buffer._storage["observation"][ep_idx, step_idx]
+    action_np = offline_buffer._storage["action"][ep_idx, step_idx]
+    next_obs_np = offline_buffer._storage["next_observation"][ep_idx, step_idx]
+
+    # Retrieve stored extras (e.g. joint_velocities, joint_forces for Adroit)
+    extra_names = offline_buffer.extra_fields
+    extras_np = {
+        name: offline_buffer._storage[name][ep_idx, step_idx]
+        for name in extra_names
+    }
 
     # Compute task rewards on sampled transitions using next_obs timing
     # to match env.step reward semantics and original U2O behavior.
     task_rewards = []
-    obs_np = batch.obs.cpu().numpy()
-    action_np = batch.action.cpu().numpy()
-    next_obs_np = batch.next_obs.cpu().numpy()
-    # Fallback zeros for z* inference (batch.sample() doesn't return extras).
-    # The more accurate per-transition extras are used in relabel_rewards below.
-    _z_extra_kw = {}
-    if env_name == "AdroitHandDoorEnv":
-        _z_extra_kw["joint_velocities"] = np.zeros(30, dtype=np.float32)
-        _z_extra_kw["joint_forces"] = np.zeros(28, dtype=np.float32)
     reward_failures = 0
-    for i in range(obs_np.shape[0]):
+    for i in range(sample_size):
         try:
+            per_transition_extras = {name: extras_np[name][i] for name in extra_names}
             env_state = build_env_state_from_transition(
                 obs=obs_np[i],
                 action=action_np[i],
                 next_obs=next_obs_np[i],
                 reward_on="next",
-                **_z_extra_kw,
+                **per_transition_extras,
             )
             r, _ = call_reward_func_dynamically(reward_func_obj, env_state)
             task_rewards.append(float(r))
@@ -416,13 +424,17 @@ def run_training_u2o(
         task_rewards, device=device, dtype=torch.float32
     ).unsqueeze(-1)
 
+    # Build torch tensors for phi computation
+    obs_t = torch.as_tensor(obs_np, device=device, dtype=torch.float32)
+    next_obs_t = torch.as_tensor(next_obs_np, device=device, dtype=torch.float32)
+
     # Match U2O init-meta logic for state features.
     if agent.cfg.feature_type == "state":
-        meta_obs = batch.next_obs
-        meta_next_obs = batch.next_obs
+        meta_obs = next_obs_t
+        meta_next_obs = next_obs_t
     else:
-        meta_obs = batch.obs
-        meta_next_obs = batch.next_obs
+        meta_obs = obs_t
+        meta_next_obs = next_obs_t
     meta = agent.infer_meta_from_obs_and_rewards(
         meta_obs, task_reward_tensor, meta_next_obs
     )

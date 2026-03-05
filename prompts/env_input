@@ -144,12 +144,12 @@ class HumanoidEnv(MujocoEnv, utils.EzPickle):
 
     If `terminate_when_unhealthy=False` is passed, the episode is ended only when 1000 timesteps are exceeded.
 
-        *position: indices from 0 to 23 → obs[0:24]
-	*velocity: indices from 24 to 46 → obs[24:47]
-	*com_inertia: indices from 47 to 186 → obs[47:187]
-	*com_velocity: indices from 187 to 270 → obs[187:271]
-	*actuator_forces: indices from 271 to 293 → obs[271:294]
-	*external_contact_forces: indices from 294 to 377 → obs[294:378]
+        *position: indices from 0 to 21 → obs[0:22]
+	*velocity: indices from 22 to 44 → obs[22:45]
+	*com_inertia: indices from 45 to 184 → obs[45:185]
+	*com_velocity: indices from 185 to 268 → obs[185:269]
+	*actuator_forces: indices from 269 to 291 → obs[269:292]
+	*external_contact_forces: indices from 292 to 375 → obs[292:376]
 		
 
     @property
