@@ -59,11 +59,13 @@ class RewardLoggerCallback(BaseCallback):
 
 
 class VelocityLoggerCallback(BaseCallback):
-    def __init__(self, velocity_filepath, wandb_cfg=None, verbose=0):
+    def __init__(self, velocity_filepath, wandb_cfg=None, env_name="HumanoidEnv", verbose=0):
         super(VelocityLoggerCallback, self).__init__(verbose)
         self.velocity_filepath = velocity_filepath
         self.wandb_cfg = wandb_cfg
+        self.env_name = env_name
         self._wandb_run = None
+        self._step_offset = None  # offset for wandb step (handles inherited checkpoints)
         # Ensure the directory exists
         os.makedirs(os.path.dirname(self.velocity_filepath), exist_ok=True)
 
@@ -87,17 +89,34 @@ class VelocityLoggerCallback(BaseCallback):
     def _on_step(self) -> bool:
         if self._wandb_run is None and self.wandb_cfg is not None:
             self._init_wandb()
+        # Normalize wandb step to start from 0 (handles inherited checkpoints
+        # where model.num_timesteps carries over from the parent).
+        if self._step_offset is None:
+            self._step_offset = self.num_timesteps - 1
+        wb_step = self.num_timesteps - self._step_offset
         info = self.locals.get("infos", [])
         if len(info) > 0:
-            signal = info[0].get("x_velocity") if "x_velocity" in info[0] else info[0].get("fitness_signal")
-            if signal is not None:
-                with open(self.velocity_filepath, "a") as f:
-                    f.write(f"{signal}\n")
-                if self._wandb_run is not None:
-                    self._wandb_run.log(
-                        {"train/fitness_signal": signal},
-                        step=self.num_timesteps,
-                    )
+            info0 = info[0]
+            if self.env_name == "AdroitHandDoorEnv":
+                signal = info0.get("fitness_signal")
+                if signal is not None:
+                    with open(self.velocity_filepath, "a") as f:
+                        f.write(f"{signal}\n")
+                    if self._wandb_run is not None:
+                        wb_dict = {"train/door_hinge": signal}
+                        if "success" in info0:
+                            wb_dict["train/success"] = float(info0["success"])
+                        self._wandb_run.log(wb_dict, step=wb_step)
+            else:
+                signal = info0.get("x_velocity")
+                if signal is not None:
+                    with open(self.velocity_filepath, "a") as f:
+                        f.write(f"{signal}\n")
+                    if self._wandb_run is not None:
+                        self._wandb_run.log(
+                            {"train/x_velocity": signal},
+                            step=wb_step,
+                        )
         return True
 
     def _on_training_end(self) -> None:
@@ -124,6 +143,8 @@ def train(
     output_path,
     log_dir,
     wandb_cfg=None,
+    env_name="HumanoidEnv",
+    parent_checkpoint_path=None,
     gpu_id=0,
 ):
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -135,6 +156,7 @@ def train(
     velocity_callback = VelocityLoggerCallback(
         velocity_filepath=velocity_path,
         wandb_cfg=wandb_cfg,
+        env_name=env_name,
         verbose=1,
     )
     os.makedirs(log_dir, exist_ok=True)
@@ -142,7 +164,14 @@ def train(
 
     reward_callback = RewardLoggerCallback(log_dir, verbose=1)
 
-    if sb3_algo == "SAC":
+    # Load parent checkpoint for fine-tuning, or create from scratch
+    if parent_checkpoint_path and os.path.exists(parent_checkpoint_path):
+        print(f"[Inherit] Loading parent checkpoint: {parent_checkpoint_path}")
+        algo_cls = {"SAC": SAC, "TD3": TD3, "A2C": A2C, "DQN": DQN, "PPO": PPO}
+        model = algo_cls[sb3_algo].load(
+            parent_checkpoint_path, env=env, device=device, tensorboard_log=log_dir,
+        )
+    elif sb3_algo == "SAC":
         model = SAC("MlpPolicy", env, verbose=1, device=device, tensorboard_log=log_dir)
     elif sb3_algo == "TD3":
         model = TD3("MlpPolicy", env, verbose=1, device=device, tensorboard_log=log_dir)
@@ -195,6 +224,7 @@ def run_training(
     log_dir,
     env_name="HumanoidEnv",
     wandb_cfg=None,
+    parent_checkpoint_path=None,
     gpu_id=0,
 ):
     if env_name == "AdroitHandDoorEnv":
@@ -236,6 +266,8 @@ def run_training(
         output_path,
         log_dir,
         wandb_cfg=wandb_cfg,
+        env_name=env_name,
+        parent_checkpoint_path=parent_checkpoint_path,
         gpu_id=gpu_id,
     )
 
@@ -527,19 +559,27 @@ def run_training_u2o(
 
             episode_reward += reward
             episode_step += 1
-            signal = info.get("x_velocity") if "x_velocity" in info else info.get("fitness_signal")
+            if env_name == "AdroitHandDoorEnv":
+                signal = info.get("fitness_signal")
+            else:
+                signal = info.get("x_velocity")
             if signal is not None:
                 velocity_log.append(signal)
 
             if done:
                 episode_count += 1
                 if wb_run is not None:
-                    wb_run.log({
+                    wb_dict = {
                         "finetune/episode_reward": episode_reward,
                         "finetune/episode_length": episode_step,
                         "finetune/episode_count": episode_count,
-                        "finetune/x_velocity": info.get("x_velocity", 0),
-                    }, step=step)
+                    }
+                    if env_name == "AdroitHandDoorEnv":
+                        wb_dict["finetune/door_hinge"] = info.get("fitness_signal", 0)
+                        wb_dict["finetune/success"] = float(info.get("success", False))
+                    else:
+                        wb_dict["finetune/x_velocity"] = info.get("x_velocity", 0)
+                    wb_run.log(wb_dict, step=step)
                 obs, info = env.reset()
                 episode_reward = 0.0
                 episode_step = 0

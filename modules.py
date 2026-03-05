@@ -277,7 +277,7 @@ class TrainPolicy:
                 gpu_id=self.gpu_id,
             )
         else:
-            # Original path: from-scratch training
+            # Original path: from-scratch (or fine-tune from parent checkpoint)
             run_training(
                 self.reward_func_str,
                 self.island_id,
@@ -291,6 +291,7 @@ class TrainPolicy:
                 log_dir,
                 env_name=self.env_name,
                 wandb_cfg=self.wandb_cfg,
+                parent_checkpoint_path=self.parent_checkpoint_path,
                 gpu_id=self.gpu_id,
             )
         return checkpoint_file, eval_log_path, self.env_name

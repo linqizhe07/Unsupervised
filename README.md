@@ -7,8 +7,10 @@ This project addresses a fundamental inefficiency in LLM-guided reward design: e
 The system combines three components:
 
 - **LLM-based reward evolution**: an island-based evolutionary algorithm uses an LLM to generate, mutate, and crossover reward function code across parallel islands
-- **Unsupervised pretraining**: a skill-conditioned policy is pretrained without any task reward using HILP feature learning and successor features, building a reusable behavioral prior
-- **Policy inheritance**: each candidate fine-tunes from its parent's checkpoint conditioned on a task-inferred skill direction z*, so policy weights evolve across generations alongside the reward function
+- **Unsupervised pretraining** (U2O mode): a skill-conditioned policy is pretrained without any task reward using HILP feature learning and successor features, building a reusable behavioral prior
+- **Policy inheritance**: each candidate fine-tunes from its parent's checkpoint, so policy weights evolve across generations alongside the reward function. Two modes:
+  - **U2O**: SFAgent checkpoint + skill inference z* + offline/online mixing (requires pretraining)
+  - **Checkpoint inheritance**: SAC checkpoint fine-tuning (no pretraining, `evolution.inherit_checkpoint=true`)
 
 ```
 [Pretrain — once per environment]        [Evolution loop — per reward candidate]
@@ -289,7 +291,7 @@ python main.py \
     evolution.individuals_per_generation=16 \
     database.num_islands=13 \
     database.num_gpus=0 \
-    data_paths.run=182 \
+    data_paths.run=197 \
     wandb.project=humanoid-u2o
 ```
 
@@ -305,7 +307,7 @@ python main.py \
     evolution.individuals_per_generation=16 \
     database.num_islands=13 \
     database.num_gpus=0 \
-    data_paths.run=126 \
+    data_paths.run=152 \
     wandb.project=adroit-u2o
 ```
 
@@ -313,6 +315,51 @@ Per-candidate fine-tuning:
 1. **Skill inference**: evaluate the reward function on the offline replay buffer → solve `z* = lstsq(φ, r)` (no gradient, no retraining)
 2. **Fine-tune**: collect online rollouts with π(·|s, z*), mix 50/50 with offline buffer, update SF networks and actor with task rewards
 3. **Checkpoint**: save policy weights for the next generation to inherit
+
+### Experiment 3: Checkpoint Inheritance (no pretraining)
+
+A lightweight variant between baseline and full U2O: no pretraining required, but child policies fine-tune from the fittest parent's SAC checkpoint instead of training from scratch.
+
+```
+Gen 0:  SAC from scratch (500k steps) → save .zip checkpoint
+Gen 1+: Load fittest parent's .zip → continue SAC training with new reward (500k steps)
+```
+
+**Humanoid + Checkpoint Inheritance:**
+```shell
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
+export OPENAI_API_KEY='<your openai key>'
+python main.py \
+    evolution.baseline=revolve_auto \
+    environment.name="HumanoidEnv" \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    evolution.inherit_checkpoint=true \
+    database.num_islands=13 \
+    database.num_gpus=0 \
+    data_paths.run=300 \
+    u2o.enabled=false \
+    wandb.project=humanoid-inherit
+```
+
+**AdroitHand + Checkpoint Inheritance:**
+```shell
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
+export OPENAI_API_KEY='<your openai key>'
+python main.py \
+    evolution.baseline=revolve_auto \
+    environment.name="AdroitHandDoorEnv" \
+    evolution.num_generations=7 \
+    evolution.individuals_per_generation=16 \
+    evolution.inherit_checkpoint=true \
+    database.num_islands=13 \
+    database.num_gpus=0 \
+    data_paths.run=301 \
+    u2o.enabled=false \
+    wandb.project=adroit-inherit
+```
+
+> Note: `inherit_checkpoint` is ignored when `u2o.enabled=true` (U2O has its own checkpoint inheritance via SFAgent).
 
 ### LLM Prompt Selection
 
@@ -365,7 +412,14 @@ Revolve/
 
 ## Key Hyperparameters
 
-`cfg/generate.yaml` (U2O section — must match pretrain args):
+`cfg/generate.yaml`:
+
+```yaml
+evolution:
+  inherit_checkpoint: false  # gen 0 from scratch, gen 1+ fine-tune from parent SAC checkpoint
+```
+
+U2O section (must match pretrain args):
 
 ```yaml
 u2o:

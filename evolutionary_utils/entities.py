@@ -129,6 +129,7 @@ class Individual:
         delete_file(self.fitness_file_path, "fitness score (.txt) file")
         delete_file(self.reward_history_path, "reward history (.json) file")
         delete_file(self.model_checkpoint_path, "model checkpoint (.zip) file")
+        delete_file(self.u2o_checkpoint_path, "U2O checkpoint (.pt) file")
 
 
 class Island:
@@ -341,11 +342,13 @@ class Island:
             founder_individual.metrics_dict,
         )
 
-        # Copy U2O checkpoint from founder island to new island so that
+        # Copy checkpoints from founder island to new island so that
         # parent checkpoint inheritance works after migration.
-        src_ckpt = founder_individual.u2o_checkpoint_path
-        if os.path.exists(src_ckpt):
-            new_individual = self.individuals[-1]
-            dst_ckpt = new_individual.u2o_checkpoint_path
-            os.makedirs(os.path.dirname(dst_ckpt), exist_ok=True)
-            shutil.copy2(src_ckpt, dst_ckpt)
+        new_individual = self.individuals[-1]
+        for src_ckpt, dst_ckpt in (
+            (founder_individual.u2o_checkpoint_path, new_individual.u2o_checkpoint_path),
+            (founder_individual.model_checkpoint_path, new_individual.model_checkpoint_path),
+        ):
+            if os.path.exists(src_ckpt):
+                os.makedirs(os.path.dirname(dst_ckpt), exist_ok=True)
+                shutil.copy2(src_ckpt, dst_ckpt)

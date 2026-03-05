@@ -164,11 +164,18 @@ class RevolveDatabase:
                     f"{self.reward_fn_dir}/island_{island_id}/model_checkpoints/"
                     f"{generation_id}_{counter_id}.zip"
                 )
+                u2o_checkpoint_path = (
+                    f"{self.reward_fn_dir}/island_{island_id}/model_checkpoints/"
+                    f"u2o_final_{generation_id}_{counter_id}.pt"
+                )
                 RevolveDatabase.delete_file(
                     reward_history_path, "reward history (.json) file"
                 )
                 RevolveDatabase.delete_file(
                     model_checkpoint_path, "model checkpoint (.zip) file"
+                )
+                RevolveDatabase.delete_file(
+                    u2o_checkpoint_path, "U2O checkpoint (.pt) file"
                 )
 
             # if island size exceeds max size, discard individual with the lowest score
@@ -319,10 +326,14 @@ class RevolveDatabase:
         )
 
         # STEP 3: pick the fittest parent's checkpoint for policy inheritance
+        # Try U2O checkpoint first (.pt), then SB3 checkpoint (.zip)
         sampled_individuals = [sampled_island.individuals[i] for i in in_context_sample_ids]
         best_parent = max(sampled_individuals, key=lambda ind: ind.fitness_score)
-        parent_ckpt = best_parent.u2o_checkpoint_path
-        parent_checkpoint_path = parent_ckpt if os.path.exists(parent_ckpt) else None
+        parent_checkpoint_path = None
+        for _ckpt in (best_parent.u2o_checkpoint_path, best_parent.model_checkpoint_path):
+            if os.path.exists(_ckpt):
+                parent_checkpoint_path = _ckpt
+                break
 
         # each sample in 'in_context_samples' is a tuple of (fn_path: str, fitness_score: float)
         logging.info(f"{operator.capitalize()} | sampled island: {sampled_island_id}")

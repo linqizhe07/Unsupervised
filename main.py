@@ -157,6 +157,11 @@ def main(cfg):
         }
         print(f"U2O mode enabled. Pretrained dir: {u2o_pretrained_dir}")
 
+    # Checkpoint inheritance (SB3): gen 0 from scratch, gen 1+ fine-tune from parent
+    inherit_checkpoint = cfg.evolution.get("inherit_checkpoint", False) and not u2o_enabled
+    if inherit_checkpoint:
+        print("Checkpoint inheritance enabled (SB3 fine-tuning from parent).")
+
     # Initialize wandb
     wandb_run = None
     wandb_cfg = cfg.get("wandb", {})
@@ -343,6 +348,8 @@ def main(cfg):
                     )
                 else:
                     policy.wandb_cfg = ft_wandb_cfg
+                    if inherit_checkpoint:
+                        policy.parent_checkpoint_path = parent_checkpoint_path
                 policies.append(policy)
                 island_ids.append(island_id)
                 rew_fn_strings.append(reward_func_str)
