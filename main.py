@@ -186,6 +186,7 @@ def main(cfg):
                     "crossover_prob": cfg.database.crossover_prob,
                     "migration_prob": cfg.database.migration_prob,
                     "u2o_enabled": u2o_enabled,
+                    "inherit_checkpoint": inherit_checkpoint,
                 },
             )
             print(f"[wandb] Initialized: {wandb_run.url}")
