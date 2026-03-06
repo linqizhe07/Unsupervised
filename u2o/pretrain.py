@@ -274,6 +274,12 @@ def collect_random_data(
             action = env.action_space.sample()
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            # Capture real physics from MuJoCo env (joint velocities & forces)
+            extras = {}
+            if hasattr(env, 'data'):
+                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
+                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
+
             replay_buffer.add_transition(
                 obs=obs,
                 action=action,
@@ -281,6 +287,7 @@ def collect_random_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
+                **extras,
             )
             obs = next_obs
             step += 1
@@ -373,6 +380,12 @@ def collect_rnd_data(
                 if np.isnan(intrinsic_r):
                     intrinsic_r = 0.0
 
+            # Capture real physics from MuJoCo env (joint velocities & forces)
+            extras = {}
+            if hasattr(env, 'data'):
+                extras["joint_velocities"] = env.data.qvel.ravel().copy().astype(np.float32)
+                extras["joint_forces"] = env.data.actuator_force.ravel().copy().astype(np.float32)
+
             # Store env reward (0.0) in buffer, not intrinsic reward
             replay_buffer.add_transition(
                 obs=obs,
@@ -381,6 +394,7 @@ def collect_rnd_data(
                 next_obs=next_obs,
                 done=done,
                 discount=0.0 if terminated else 1.0,
+                **extras,
             )
 
             norm_obs_detached = norm_obs.squeeze(0).detach()
@@ -711,24 +725,38 @@ def pretrain(
     # ============================================================
     # Phase 1: Data Collection
     # ============================================================
-    if exploration == "d4rl":
-        # GCRL pipeline: load D4RL offline datasets directly (no env needed).
-        #
-        # Datasets are loaded in the order specified. The circular buffer naturally
-        # handles overflow: when total episodes across all datasets exceeds
-        # max_buffer_episodes, the oldest episodes (from the first datasets) are
-        # overwritten by the newest ones.
-        #
-        # Recommended order for door tasks:
-        #   door-cloned-v1,door-expert-v1,door-human-v1
-        # This way the small but high-quality human/expert trajectories are loaded
-        # last and are guaranteed to remain in the buffer, while cloned provides the
-        # bulk of state-space coverage. Equal-per-dataset caps are NOT used because
-        # door-human-v1 has only ~25 episodes; capping cloned at 3333 wastes buffer
-        # capacity without improving the sampling distribution.
+    # Supports three modes:
+    #   1. d4rl-only:  --exploration d4rl --d4rl_dataset ...
+    #   2. explore-only: --exploration random/rnd (no --d4rl_dataset)
+    #   3. hybrid:     --exploration random/rnd --d4rl_dataset ...
+    #      Explore first (real physics), then load D4RL demos on top.
+    #      D4RL loaded last so high-quality demos stay in circular buffer.
+    total_collected = 0
+
+    # Phase 1a: Live exploration (if not d4rl-only)
+    if exploration != "d4rl":
+        env, _, _ = create_env(env_name)
+        try:
+            if exploration == "rnd":
+                print(
+                    f"\n--- Phase 1a: Collecting {collection_episodes} episodes with RND exploration ---"
+                )
+                total_collected += collect_rnd_data(
+                    env, replay_buffer, collection_episodes, max_episode_steps, device=device
+                )
+            else:
+                print(f"\n--- Phase 1a: Collecting {collection_episodes} episodes of random data ---")
+                total_collected += collect_random_data(
+                    env, replay_buffer, collection_episodes, max_episode_steps
+                )
+        finally:
+            env.close()
+
+    # Phase 1b: Load D4RL datasets (if specified)
+    if d4rl_datasets:
         num_datasets = len(d4rl_datasets)
-        print(f"\n--- Phase 1: Loading {num_datasets} D4RL dataset(s) (GCRL pipeline) ---")
-        total_collected = 0
+        phase_label = "Phase 1b" if exploration != "d4rl" else "Phase 1"
+        print(f"\n--- {phase_label}: Loading {num_datasets} D4RL dataset(s) ---")
         for i, ds_name in enumerate(d4rl_datasets):
             print(f"  [{i+1}/{num_datasets}] {ds_name}  (up to {max_buffer_episodes} episodes)")
             total_collected += load_d4rl_data(
@@ -738,23 +766,6 @@ def pretrain(
                 expected_obs_dim=obs_dim,
                 expected_action_dim=action_dim,
             )
-    else:
-        env, _, _ = create_env(env_name)
-        try:
-            if exploration == "rnd":
-                print(
-                    f"\n--- Phase 1: Collecting {collection_episodes} episodes with RND exploration ---"
-                )
-                total_collected = collect_rnd_data(
-                    env, replay_buffer, collection_episodes, max_episode_steps, device=device
-                )
-            else:
-                print(f"\n--- Phase 1: Collecting {collection_episodes} episodes of random data ---")
-                total_collected = collect_random_data(
-                    env, replay_buffer, collection_episodes, max_episode_steps
-                )
-        finally:
-            env.close()
 
     print(f"Loaded {total_collected} transitions in {len(replay_buffer)} episodes")
     if len(replay_buffer) == 0:

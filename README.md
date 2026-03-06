@@ -182,13 +182,35 @@ python -m u2o.pretrain \
     --max_buffer_episodes 10000 \
     --pretrain_steps 1000000 \
     --batch_size 1024 \
-    --z_dim 50 \
+    --z_dim 20 \
     --hidden_dim 1024 \
     --phi_hidden_dim 512 \
     --feature_dim 512 \
     --feature_learner hilp \
     --wandb_project pretrain-adroit
 ```
+
+**Hybrid mode** (recommended): combine live RND exploration (real physics) with D4RL expert demos:
+
+```shell
+python -m u2o.pretrain \
+    --env adroit_door \
+    --output_dir ./u2o_pretrained_adroit_hybrid \
+    --exploration rnd \
+    --d4rl_dataset door-expert-v1,door-human-v1 \
+    --collection_episodes 5000 \
+    --max_buffer_episodes 10000 \
+    --pretrain_steps 500000 \
+    --batch_size 1024 \
+    --z_dim 20 \
+    --hidden_dim 512 \
+    --phi_hidden_dim 256 \
+    --feature_dim 256 \
+    --feature_learner hilp \
+    --wandb_project pretrain-adroit
+```
+
+This first collects RND exploration data with real `joint_velocities` and `joint_forces` from MuJoCo, then loads D4RL demos on top (loaded last so they stay in the circular buffer).
 
 Single-dataset usage still works unchanged:
 
@@ -254,9 +276,9 @@ python main.py \
     evolution.individuals_per_generation=16 \
     database.num_islands=13 \
     database.num_gpus=0 \
-    data_paths.run=100 \
+    data_paths.run=139 \
     u2o.enabled=false \
-    wandb.project=humanoid-baseline
+    wandb.project=humanoid-baseline-1
 ```
 
 **AdroitHand:**
