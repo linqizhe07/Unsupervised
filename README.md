@@ -354,7 +354,7 @@ python main.py \
     evolution.inherit_checkpoint=true \
     database.num_islands=13 \
     database.num_gpus=0 \
-    data_paths.run=301 \
+    data_paths.run=307 \
     u2o.enabled=false \
     wandb.project=adroit-inherit
 ```
