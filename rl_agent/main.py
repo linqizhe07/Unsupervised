@@ -121,10 +121,9 @@ class VelocityLoggerCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         # Do NOT call finish() here: train() calls model.learn() in a while loop,
-        # so _on_training_end fires after every 50k-step chunk. Finishing the run
+        # so _on_training_end fires after every 5k-step chunk. Finishing the run
         # here would cause the next chunk's _on_step to log to an already-finished
-        # run and raise UsageError. Each train_policy() runs in its own subprocess
-        # (ProcessPoolExecutor spawn), so wandb auto-finishes via atexit on exit.
+        # run and raise UsageError. The run is finished in train()'s finally block.
         pass
 
 
@@ -189,15 +188,21 @@ def train(
     TIMESTEPS = 5000
     total_timesteps = 500000
 
-    while current_timesteps < total_timesteps:
-        model.learn(
-            total_timesteps=TIMESTEPS,
-            reset_num_timesteps=False,
-            callback=[velocity_callback, reward_callback],
-        )
-        current_timesteps += TIMESTEPS
+    try:
+        while current_timesteps < total_timesteps:
+            model.learn(
+                total_timesteps=TIMESTEPS,
+                reset_num_timesteps=False,
+                callback=[velocity_callback, reward_callback],
+            )
+            current_timesteps += TIMESTEPS
 
-        model.save(final_checkpoint_path)
+            model.save(final_checkpoint_path)
+    finally:
+        # Explicitly finish subprocess wandb run so data is flushed to the server.
+        # Cannot rely on atexit because ProcessPoolExecutor reuses worker processes.
+        if velocity_callback._wandb_run is not None:
+            velocity_callback._wandb_run.finish()
 
 
 # env=HumanoidEnv(

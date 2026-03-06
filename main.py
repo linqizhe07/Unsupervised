@@ -200,12 +200,17 @@ def main(cfg):
             # use their own step dimensions rather than wandb's global step.
             wandb.define_metric("individual_idx")
             wandb.define_metric("individual/*", step_metric="individual_idx")
+            wandb.define_metric("generation")
             wandb.define_metric("gen/*", step_metric="generation")
             wandb.define_metric("global/*", step_metric="generation")
-            wandb.define_metric("island_*", step_metric="generation")
             wandb.define_metric("temperature", step_metric="generation")
-        except ImportError:
-            logging.warning("wandb not installed; disabling wandb logging.")
+            # Per-island metrics: island_0/best_fitness, island_1/avg_fitness, etc.
+            # wandb define_metric only supports suffix globs (e.g. "island_0/*"),
+            # NOT mid-pattern wildcards (e.g. "island_*/*" crashes).
+            for _iid in range(cfg.database.num_islands):
+                wandb.define_metric(f"island_{_iid}/*", step_metric="generation")
+        except Exception:
+            logging.warning("wandb init/define_metric failed; disabling wandb logging.")
             wandb_run = None
 
     # Lineage table for tracking parent-child relationships
