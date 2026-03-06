@@ -201,7 +201,8 @@ def main(cfg):
             wandb.define_metric("individual/*", step_metric="individual_idx")
             wandb.define_metric("gen/*", step_metric="generation")
             wandb.define_metric("global/*", step_metric="generation")
-            wandb.define_metric("island_*", step_metric="generation")
+            wandb.define_metric("island_*/*", step_metric="generation")
+            wandb.define_metric("temperature", step_metric="generation")
         except ImportError:
             logging.warning("wandb not installed; disabling wandb logging.")
             wandb_run = None
@@ -510,10 +511,6 @@ def main(cfg):
                     log_dict[f"island_{iid}/best_fitness"] = island.best_fitness_score
                     log_dict[f"island_{iid}/avg_fitness"] = float(island.average_fitness_score)
                     log_dict[f"island_{iid}/size"] = island.size
-
-            # per-individual fitness scores for this generation
-            for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
-                log_dict[f"individuals/g{generation_id}_c{cid}_island{iid}_fitness"] = float(fit)
 
             wandb_run.log(log_dict)
 
