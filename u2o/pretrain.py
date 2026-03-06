@@ -699,7 +699,9 @@ def pretrain(
     print(f"  Device: {device}")
     print(f"  z_dim: {z_dim}, feature_learner: {feature_learner}")
     if exploration == "d4rl":
-        print(f"  Data source: D4RL datasets {d4rl_datasets} (GCRL pipeline)")
+        print(f"  Data source: D4RL datasets {d4rl_datasets}")
+    elif d4rl_datasets:
+        print(f"  Data source: hybrid (RND/random {collection_episodes} eps + D4RL {d4rl_datasets})")
     else:
         print(f"  Collection episodes: {collection_episodes}")
     print(f"  Pretrain steps: {pretrain_steps}")
@@ -708,7 +710,7 @@ def pretrain(
 
     # Create replay buffer
     replay_episode_length = max_episode_steps + 1
-    if exploration == "d4rl" and d4rl_datasets:
+    if d4rl_datasets:
         for _ds in d4rl_datasets:
             dataset_horizon = _D4RL_DATASET_INFO.get(_ds, {}).get("max_episode_steps")
             if dataset_horizon is not None:
@@ -733,19 +735,22 @@ def pretrain(
     #      D4RL loaded last so high-quality demos stay in circular buffer.
     total_collected = 0
 
+    is_hybrid = exploration != "d4rl" and bool(d4rl_datasets)
+
     # Phase 1a: Live exploration (if not d4rl-only)
     if exploration != "d4rl":
         env, _, _ = create_env(env_name)
         try:
+            phase_label = "Phase 1a" if is_hybrid else "Phase 1"
             if exploration == "rnd":
                 print(
-                    f"\n--- Phase 1a: Collecting {collection_episodes} episodes with RND exploration ---"
+                    f"\n--- {phase_label}: Collecting {collection_episodes} episodes with RND exploration ---"
                 )
                 total_collected += collect_rnd_data(
                     env, replay_buffer, collection_episodes, max_episode_steps, device=device
                 )
             else:
-                print(f"\n--- Phase 1a: Collecting {collection_episodes} episodes of random data ---")
+                print(f"\n--- {phase_label}: Collecting {collection_episodes} episodes of random data ---")
                 total_collected += collect_random_data(
                     env, replay_buffer, collection_episodes, max_episode_steps
                 )
@@ -755,7 +760,7 @@ def pretrain(
     # Phase 1b: Load D4RL datasets (if specified)
     if d4rl_datasets:
         num_datasets = len(d4rl_datasets)
-        phase_label = "Phase 1b" if exploration != "d4rl" else "Phase 1"
+        phase_label = "Phase 1b" if is_hybrid else "Phase 1"
         print(f"\n--- {phase_label}: Loading {num_datasets} D4RL dataset(s) ---")
         for i, ds_name in enumerate(d4rl_datasets):
             print(f"  [{i+1}/{num_datasets}] {ds_name}  (up to {max_buffer_episodes} episodes)")

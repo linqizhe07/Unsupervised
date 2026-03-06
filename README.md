@@ -17,7 +17,7 @@ The system combines three components:
 
   Humanoid: RND exploration  ──┐
                                ├──→ ReplayBuffer
-  AdroitHand: D4RL datasets ──┘   (cloned + expert + human, circular buffer)         │
+  AdroitHand: RND exploration ─┘   (circular buffer, real physics)         │
                                     HILP φ(s): temporal-distance features
                                          │
                                     SF F(s,z,a): skill-conditioned Q
@@ -137,70 +137,19 @@ python -m u2o.pretrain \
     --wandb_project pretrain-humanoid
 ```
 
-### AdroitHand — GCRL Pipeline (D4RL offline dataset)
+### AdroitHand — Exploration + Pretraining
 
-The AdroitHand environment has high-quality offline datasets from D4RL. The environment is **never instantiated** during pretraining — the dataset is loaded directly into the replay buffer.
-
-```
-D4RL dataset (door-human-v1 / door-cloned-v1 / door-expert-v1)
-    │
-    ├── Split by terminals/timeouts into episodes
-    ├── terminal → discount=0.0 | timeout → discount=1.0
-    │
-    └──→ ReplayBuffer (obs=39, action=28)
-```
-
-Available datasets:
-
-| Dataset | Episodes | Notes |
-|---------|----------|-------|
-| `door-human-v1` | ~25 | MOCO-captured human demos — highest quality but very few |
-| `door-cloned-v1` | ~5000 | BC rollouts from human demos — largest, most diverse coverage |
-| `door-expert-v1` | ~200 | Expert policy rollouts — reliable successes |
-
-**Multi-dataset loading** (recommended): pass a comma-separated list to `--d4rl_dataset`. Datasets are loaded in order into a circular replay buffer; **load large datasets first and small/high-quality ones last**, so the small datasets are never overwritten.
-
-```
-Loading order:  cloned (fills buffer) → expert (overwrites oldest cloned) → human (idem)
-Buffer result:  9775 cloned + 200 expert + 25 human  (with max_buffer_episodes=10000)
-Sampling:       uniform over all episodes — each dataset contributes proportionally to its size
-```
-
-> **Why not equal allocation?** `door-human-v1` has only ~25 episodes. Capping cloned at `max_buffer_episodes / 3 = 3333` to "balance" it would waste 3308 buffer slots and reduce cloned's state-coverage contribution without meaningfully increasing human's share (it would still be < 1 % of training batches).
+**Recommended: RND exploration (real physics)**. The agent collects its own data using RND exploration — same pipeline as Humanoid. This gives real `joint_velocities` and `joint_forces` from MuJoCo, which D4RL datasets lack (D4RL stores `joint_forces=zeros` and approximate `joint_velocities` via finite difference).
 
 ```shell
-# h5py contains C extensions compiled against a specific numpy ABI.
-# If you see "numpy.dtype size changed, may indicate binary incompatibility",
-# reinstall h5py so it is compiled against the currently installed numpy:
-pip uninstall h5py -y && pip install h5py
 export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
 python -m u2o.pretrain \
     --env adroit_door \
     --output_dir ./u2o_pretrained_adroit \
-    --exploration d4rl \
-    --d4rl_dataset door-cloned-v1,door-expert-v1,door-human-v1 \
+    --exploration rnd \
+    --collection_episodes 10000 \
     --max_buffer_episodes 10000 \
     --pretrain_steps 1000000 \
-    --batch_size 1024 \
-    --z_dim 20 \
-    --hidden_dim 1024 \
-    --phi_hidden_dim 512 \
-    --feature_dim 512 \
-    --feature_learner hilp \
-    --wandb_project pretrain-adroit
-```
-
-**Hybrid mode** (recommended): combine live RND exploration (real physics) with D4RL expert demos:
-
-```shell
-python -m u2o.pretrain \
-    --env adroit_door \
-    --output_dir ./u2o_pretrained_adroit_hybrid \
-    --exploration rnd \
-    --d4rl_dataset door-expert-v1,door-human-v1 \
-    --collection_episodes 5000 \
-    --max_buffer_episodes 10000 \
-    --pretrain_steps 500000 \
     --batch_size 1024 \
     --z_dim 20 \
     --hidden_dim 512 \
@@ -210,12 +159,54 @@ python -m u2o.pretrain \
     --wandb_project pretrain-adroit
 ```
 
-This first collects RND exploration data with real `joint_velocities` and `joint_forces` from MuJoCo, then loads D4RL demos on top (loaded last so they stay in the circular buffer).
+**Alternative: D4RL offline datasets**. Available but note that D4RL data has `joint_forces=zeros` and `joint_velocities` approximated via finite difference — these missing physics signals may hurt reward functions that depend on them.
 
-Single-dataset usage still works unchanged:
+| Dataset | Episodes | Notes |
+|---------|----------|-------|
+| `door-human-v1` | ~25 | MOCO-captured human demos — highest quality but very few |
+| `door-cloned-v1` | ~5000 | BC rollouts from human demos — largest, most diverse coverage |
+| `door-expert-v1` | ~5000 | Expert policy rollouts — reliable successes |
 
 ```shell
-python -m u2o.pretrain --exploration d4rl --d4rl_dataset door-cloned-v1 ...
+# h5py contains C extensions compiled against a specific numpy ABI.
+# If you see "numpy.dtype size changed, may indicate binary incompatibility",
+# reinstall h5py so it is compiled against the currently installed numpy:
+pip uninstall h5py -y && pip install h5py
+export ROOT_PATH='/home/ubuntu/zeroshotRevolve'
+python -m u2o.pretrain \
+    --env adroit_door \
+    --output_dir ./u2o_pretrained_adroit_d4rl \
+    --exploration d4rl \
+    --d4rl_dataset door-cloned-v1,door-expert-v1,door-human-v1 \
+    --max_buffer_episodes 10000 \
+    --pretrain_steps 1000000 \
+    --batch_size 1024 \
+    --z_dim 20 \
+    --hidden_dim 512 \
+    --phi_hidden_dim 256 \
+    --feature_dim 256 \
+    --feature_learner hilp \
+    --wandb_project pretrain-adroit
+```
+
+**Hybrid mode**: combine live RND exploration (real physics) with D4RL expert demos:
+
+```shell
+python -m u2o.pretrain \
+    --env adroit_door \
+    --output_dir ./u2o_pretrained_adroit_hybrid \
+    --exploration rnd \
+    --d4rl_dataset door-expert-v1,door-human-v1 \
+    --collection_episodes 10000 \
+    --max_buffer_episodes 20000 \
+    --pretrain_steps 1000000 \
+    --batch_size 1024 \
+    --z_dim 20 \
+    --hidden_dim 512 \
+    --phi_hidden_dim 256 \
+    --feature_dim 256 \
+    --feature_learner hilp \
+    --wandb_project pretrain-adroit
 ```
 
 ### Offline Training (Phase 2) — Both Environments
