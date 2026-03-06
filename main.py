@@ -513,9 +513,7 @@ def main(cfg):
                     log_dict[f"island_{iid}/avg_fitness"] = float(island.average_fitness_score)
                     log_dict[f"island_{iid}/size"] = island.size
 
-            wandb_run.log(log_dict)
-
-            # update lineage table
+            # update lineage table and include it in the same log call
             if lineage_table is not None:
                 for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
                     pid_str, p_fit = parent_infos[i] if i < len(parent_infos) else ("N/A", float("nan"))
@@ -529,10 +527,12 @@ def main(cfg):
                         p_fit if not (p_fit != p_fit) else None,  # NaN → None for wandb
                     )
                 import wandb as _wandb2
-                wandb_run.log({"lineage": _wandb2.Table(
+                log_dict["lineage"] = _wandb2.Table(
                     columns=lineage_table.columns,
-                    data=lineage_table.data,
-                )})
+                    data=list(lineage_table.data),
+                )
+
+            wandb_run.log(log_dict)
 
     if wandb_run is not None:
         wandb_run.finish()

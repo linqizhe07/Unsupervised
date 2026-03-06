@@ -82,22 +82,21 @@ def create_dummy_adroit_env():
 
 # -----------------------------------------------------------------------
 # Environment registry
-# Add new environments here: name -> (obs_dim, action_dim, factory_fn)
+# name -> (obs_dim, action_dim, max_episode_steps, factory_fn)
 # -----------------------------------------------------------------------
 ENV_REGISTRY = {
-    "humanoid": (376, 17, create_dummy_humanoid_env),
-    "adroit_door": (39, 28, create_dummy_adroit_env),
-    # "carla": (128, 2, create_dummy_carla_env),  # future: autonomous driving
+    "humanoid": (376, 17, 1000, create_dummy_humanoid_env),
+    "adroit_door": (39, 28, 1000, create_dummy_adroit_env),
 }
 
 
 def create_env(env_name: str):
-    """Return (env, obs_dim, action_dim) for the given environment name."""
+    """Return (env, obs_dim, action_dim, max_episode_steps) for the given environment name."""
     if env_name not in ENV_REGISTRY:
         choices = ", ".join(ENV_REGISTRY.keys())
         raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
-    obs_dim, action_dim, factory_fn = ENV_REGISTRY[env_name]
-    return factory_fn(), obs_dim, action_dim
+    obs_dim, action_dim, max_ep_steps, factory_fn = ENV_REGISTRY[env_name]
+    return factory_fn(), obs_dim, action_dim, max_ep_steps
 
 
 # D4RL door dataset registry — no mujoco_py or d4rl package required.
@@ -577,7 +576,6 @@ def pretrain(
     add_trunk: bool = False,
     collection_episodes: int = 10000,
     pretrain_steps: int = 1000000,
-    max_episode_steps: int = 500,
     max_buffer_episodes: int = 10000,
     eval_every: int = 500000,
     log_every: int = 1000,
@@ -595,6 +593,11 @@ def pretrain(
     Phase 1: Data collection (random or RND-guided)
     Phase 2: Offline pretraining (train SFAgent on collected data)
     """
+    if env_name not in ENV_REGISTRY:
+        choices = ", ".join(ENV_REGISTRY.keys())
+        raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
+    obs_dim, action_dim, max_episode_steps, _ = ENV_REGISTRY[env_name]
+
     validate_pretrain_args(
         feature_learner=feature_learner,
         collection_episodes=collection_episodes,
@@ -616,11 +619,6 @@ def pretrain(
 
     os.makedirs(output_dir, exist_ok=True)
     utils.set_seed_everywhere(seed)
-
-    if env_name not in ENV_REGISTRY:
-        choices = ", ".join(ENV_REGISTRY.keys())
-        raise ValueError(f"Unknown env '{env_name}'. Supported: {choices}")
-    obs_dim, action_dim, _ = ENV_REGISTRY[env_name]
 
     # Build config dict for logging
     config = {
@@ -739,7 +737,7 @@ def pretrain(
 
     # Phase 1a: Live exploration (if not d4rl-only)
     if exploration != "d4rl":
-        env, _, _ = create_env(env_name)
+        env, _, _, _ = create_env(env_name)
         try:
             phase_label = "Phase 1a" if is_hybrid else "Phase 1"
             if exploration == "rnd":
@@ -931,7 +929,6 @@ if __name__ == "__main__":
     parser.add_argument("--collection_episodes", type=int, default=10000)
     parser.add_argument("--max_buffer_episodes", type=int, default=10000)
     parser.add_argument("--pretrain_steps", type=int, default=1000000)
-    parser.add_argument("--max_episode_steps", type=int, default=500)
     parser.add_argument("--eval_every", type=int, default=500000)
     parser.add_argument("--log_every", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
@@ -981,7 +978,6 @@ if __name__ == "__main__":
         collection_episodes=args.collection_episodes,
         max_buffer_episodes=args.max_buffer_episodes,
         pretrain_steps=args.pretrain_steps,
-        max_episode_steps=args.max_episode_steps,
         eval_every=args.eval_every,
         log_every=args.log_every,
         exploration=args.exploration,

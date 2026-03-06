@@ -156,7 +156,7 @@ python -m u2o.pretrain \
     --phi_hidden_dim 256 \
     --feature_dim 256 \
     --feature_learner hilp \
-    --wandb_project pretrain-adroit
+    --wandb_project pretrain-adroit-RND
 ```
 
 **Alternative: D4RL offline datasets**. Available but note that D4RL data has `joint_forces=zeros` and `joint_velocities` approximated via finite difference — these missing physics signals may hurt reward functions that depend on them.
