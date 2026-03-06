@@ -202,7 +202,7 @@ def main(cfg):
             wandb.define_metric("individual/*", step_metric="individual_idx")
             wandb.define_metric("gen/*", step_metric="generation")
             wandb.define_metric("global/*", step_metric="generation")
-            wandb.define_metric("island_*/*", step_metric="generation")
+            wandb.define_metric("island_*", step_metric="generation")
             wandb.define_metric("temperature", step_metric="generation")
         except ImportError:
             logging.warning("wandb not installed; disabling wandb logging.")
