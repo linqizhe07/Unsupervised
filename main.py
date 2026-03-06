@@ -392,8 +392,7 @@ def main(cfg):
                     "gen/max_fitness": 0.0,
                     "gen/min_fitness": 0.0,
                     "gen/std_fitness": 0.0,
-                }, step=_individual_idx)
-                _individual_idx += 1
+                })
             continue
 
         # train policies in parallel (num_gpus=0 means all at once)
@@ -438,7 +437,7 @@ def main(cfg):
                         "individual/fitness": float(_metrics["fitness"]),
                         "individual/island": float(_policy.island_id),
                         "individual/generation": float(_policy.generation_id),
-                    }, step=_individual_idx)
+                    })
                 _individual_idx += 1
 
         ckpt_and_performance_paths = [_results_map[i][0] for i in range(len(policies))]
@@ -516,8 +515,7 @@ def main(cfg):
             for i, (cid, iid, fit) in enumerate(zip(counter_ids, island_ids, fitness_scores)):
                 log_dict[f"individuals/g{generation_id}_c{cid}_island{iid}_fitness"] = float(fit)
 
-            wandb_run.log(log_dict, step=_individual_idx)
-            _individual_idx += 1
+            wandb_run.log(log_dict)
 
             # update lineage table
             if lineage_table is not None:
@@ -536,8 +534,7 @@ def main(cfg):
                 wandb_run.log({"lineage": _wandb2.Table(
                     columns=lineage_table.columns,
                     data=lineage_table.data,
-                )}, step=_individual_idx)
-                _individual_idx += 1
+                )})
 
     if wandb_run is not None:
         wandb_run.finish()
