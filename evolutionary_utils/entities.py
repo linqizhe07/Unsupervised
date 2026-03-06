@@ -342,13 +342,14 @@ class Island:
             founder_individual.metrics_dict,
         )
 
-        # Copy checkpoints from founder island to new island so that
-        # parent checkpoint inheritance works after migration.
+        # Copy checkpoints and reward history from founder island to new island
+        # so that parent checkpoint inheritance and in-context prompting work after migration.
         new_individual = self.individuals[-1]
-        for src_ckpt, dst_ckpt in (
+        for src, dst in (
             (founder_individual.u2o_checkpoint_path, new_individual.u2o_checkpoint_path),
             (founder_individual.model_checkpoint_path, new_individual.model_checkpoint_path),
+            (founder_individual.reward_history_path, new_individual.reward_history_path),
         ):
-            if os.path.exists(src_ckpt):
-                os.makedirs(os.path.dirname(dst_ckpt), exist_ok=True)
-                shutil.copy2(src_ckpt, dst_ckpt)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
