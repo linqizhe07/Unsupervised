@@ -3,3 +3,12 @@ __pycache__/
 .DS_Store
 *.egg-info/
 
+# Large pretrained model checkpoints / replay buffers
+u2o_pretrained_*/
+
+# wandb local logs
+wandb/
+
+# debug logs
+debug.log
+
